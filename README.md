@@ -8,3 +8,7 @@
     
 3. transformer_xl_multihead, [src](https://mlexplained.com/2019/07/04/building-the-transformer-xl-from-scratch/)
     * build Transformer + XLNet + MultiAttention heads
+
+4. xlnet, [src](https://github.com/graykode/xlnet-Pytorch)
+    * build standard [XLNet](https://arxiv.org/pdf/1906.08237.pdf)
+    * more tutorial [1](https://towardsdatascience.com/what-is-xlnet-and-why-it-outperforms-bert-8d8fce710335)
