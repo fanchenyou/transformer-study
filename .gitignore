@@ -11,6 +11,7 @@
 .cache
 .classpath
 .data/
+data/shakespeare
 .ensime
 .ensime_cache/
 .ensime_lucene

@@ -1,4 +1,4 @@
-## transformer-study: Transformer network variants tutorials
+## Several Transformer network variants tutorials
 
 #### 1. transformer_encoder, [src](https://pytorch.org/tutorials/beginner/transformer_tutorial.html)
    * use Pytorch nn.transformer package to build an encoder for language prediction
