@@ -289,7 +289,7 @@ def _local_perm(inputs, targets, is_masked, perm_size, seq_len):
     # `perm_mask` and `target_mask`
     # non-functional tokens
     non_func_tokens = ~(torch.eq(inputs, SEP_ID) | torch.eq(inputs, CLS_ID))
-    non_mask_tokens = (~is_masked) & non_func_tokens
+    non_mask_tokens = (~is_masked) & non_func_tokens.byte()
     masked_or_func_tokens = ~non_mask_tokens
 
     # Set the permutation indices of non-masked (& non-funcional) tokens to the
@@ -304,7 +304,7 @@ def _local_perm(inputs, targets, is_masked, perm_size, seq_len):
     # Create `target_mask`: non-funcional and maksed tokens
     # 1: use mask as input and have loss
     # 0: use token (or [SEP], [CLS]) as input and do not have loss
-    target_tokens = masked_or_func_tokens & non_func_tokens
+    target_tokens = masked_or_func_tokens & non_func_tokens.byte()
     target_mask = target_tokens.type(torch.float32)
 
     # Create `perm_mask`
@@ -314,7 +314,7 @@ def _local_perm(inputs, targets, is_masked, perm_size, seq_len):
 
     # 1: cannot attend if i <= j and j is not non-masked (masked_or_func_tokens)
     # 0: can attend if i > j or j is non-masked
-    perm_mask = (self_rev_index[:, None] <= rev_index[None, :]) &  masked_or_func_tokens
+    perm_mask = (self_rev_index[:, None] <= rev_index[None, :]) &  masked_or_func_tokens.bool()
     perm_mask = perm_mask.type(torch.float32)
 
     # new target: [next token] for LM and [curr token] (self) for PLM
