@@ -1,5 +1,5 @@
-# source https://github.com/graykode/xlnet-Pytorch
-# reference code https://github.com/huggingface/pytorch-transformers/blob/master/pytorch_transformers/modeling_xlnet.py
+# source https://github.com/huggingface/transformers/tree/master/transformers
+# doc https://huggingface.co/transformers/model_doc/xlnet.html
 
 from __future__ import absolute_import
 from __future__ import division
@@ -17,7 +17,7 @@ from pytorch_pretrained_bert import BertTokenizer
 import sys
 
 sys.path.insert(0, './')
-from utils import data_utils_3 as data_utils
+from utils import data_utils
 
 
 class XLNet(nn.Module):
@@ -25,6 +25,7 @@ class XLNet(nn.Module):
         Defines a Transformer-XL computation graph with additional
         support for XLNet.
 
+        Doc url:
         Args:
 
         inp_k: int32 Tensor in shape [len, bsz], the input token IDs.
@@ -81,12 +82,12 @@ class XLNet(nn.Module):
         self.d_model = d_model
         self.dropout = dropout
         self.dropatt = dropatt
-        self.attn_type = attn_type
         self.bi_data = bi_data
         self.clamp_len = clamp_len
         self.same_length = same_length
         self.reuse_len = reuse_len
         self.mem_len = mem_len
+        self.attn_type = attn_type
 
         self.embedding = nn.Embedding(n_token, d_model)
         self.Dropout = nn.Dropout(p=dropout)
@@ -123,20 +124,6 @@ class XLNet(nn.Module):
 
         self.softmax_b = nn.Parameter(torch.zeros(self.n_token))
 
-    def gelu(self, x):
-        """Gaussian Error Linear Unit.
-
-        This is a smoother version of the RELU.
-        Original paper: https://arxiv.org/abs/1606.08415
-        Args:
-          x: float Tensor to perform activation.
-
-        Returns:
-          `x` with the GELU activation applied.
-        """
-        cdf = 0.5 * (1.0 + torch.tanh(
-            (np.sqrt(2 / np.pi) * (x + 0.044715 * torch.pow(x, 3)))))
-        return x * cdf
 
     def rel_shift(self, x, klen=-1):
         """perform relative shift to form the relative attention score."""
@@ -151,7 +138,7 @@ class XLNet(nn.Module):
 
         return x
 
-    def positionwise_ffn(self, inp, activation_type='relu'):
+    def positionwise_ffn(self, inp, activation_type='gelu'):
 
         """Position-wise Feed-forward Network."""
         output = self.conv1(inp)
@@ -159,7 +146,8 @@ class XLNet(nn.Module):
         if activation_type == 'relu':
             output = self.relu(output)
         elif activation_type == 'gelu':
-            output = self.gelu(output)
+            #output = self.gelu(output)
+            output = F.gelu(output)
         else:
             raise ValueError('Unsupported activation type {}'.format(activation_type))
 
@@ -400,14 +388,9 @@ class XLNet(nn.Module):
             freq_seq = freq_seq.type(dtype)
         inv_freq = 1 / (10000 ** (freq_seq / d_model))
 
-        if attn_type == 'bi':
-            # beg, end = klen - 1, -qlen
-            beg, end = klen, -qlen
-        elif attn_type == 'uni':
-            # beg, end = klen - 1, -1
-            beg, end = klen, -1
-        else:
-            raise ValueError('Unknown `attn_type` {}.'.format(attn_type))
+        assert attn_type == 'bi'  # always set to XLNet
+        beg, end = klen, -qlen
+
 
         if bi_data:
             fwd_pos_seq = torch.arange(beg, end, -1.0)
@@ -445,13 +428,8 @@ class XLNet(nn.Module):
 
         ##### Attention mask
         # causal attention mask
-        if self.attn_type == 'uni':
-            attn_mask = self._create_mask(qlen, mlen, torch.int64, self.same_length)
-            attn_mask = attn_mask[:, :, None, None]
-        elif self.attn_type == 'bi':
-            attn_mask = None
-        else:
-            raise ValueError('Unsupported attention type: {}'.format(self.attn_type))
+        assert self.attn_type == 'bi'
+        attn_mask = None
 
         # data mask: input mask & perm mask
         if input_mask is not None and perm_mask is not None:
@@ -624,6 +602,14 @@ if __name__ == "__main__":
     for num_epoch in range(args.num_epoch):
         mems = None
 
+        '''
+        feature: 
+            input: int32 array
+            is_masked: bool array
+            target: int32 array, one word shift away from input
+            seg_id: 0...1...
+            label: 0
+        '''
         features = data_utils._create_data(sp=sp,
                                            input_paths=args.data,
                                            seq_len=args.seq_len,
@@ -633,8 +619,44 @@ if __name__ == "__main__":
                                            mask_alpha=args.mask_alpha,
                                            mask_beta=args.mask_beta)
 
+
         num_step = 0
         for feature in features:
+
+            '''
+            Various mask types:
+                        
+                # Set the permutation indices of non-masked (& non-functional) tokens to the
+                # smallest index (-1):
+                # (1) they can be seen by all other positions
+                # (2) they cannot see masked positions, so there won't be information leak
+            
+                # Create `target_mask`: non-functional and masked tokens
+                # 1: use mask as input and have loss
+                # 0: use token (or [SEP], [CLS]) as input and do not have loss
+            
+                # Create `perm_mask`
+                # `target_tokens` cannot see themselves
+                # put `rev_index` if real mask(not cls or sep) else `rev_index + 1`
+                self_rev_index = torch.where(target_tokens, rev_index, rev_index + 1)
+            
+                # 1: cannot attend if i <= j and j is not non-masked (masked_or_func_tokens)
+                # 0: can attend if i > j or j is non-masked
+                perm_mask = (self_rev_index[:, None] <= rev_index[None, :]) & masked_or_func_tokens.bool()
+                perm_mask = perm_mask.type(torch.float32)
+            
+                # new target: [next token] for LM and [curr token] (self) for PLM
+                new_targets = torch.cat([inputs[0: 1], targets[: -1]], dim=0)
+            
+                # construct inputs_k
+                inputs_k = inputs
+            
+                # construct inputs_q
+                inputs_q = target_mask
+            
+                return perm_mask, new_targets, target_mask, inputs_k, inputs_q
+            '''
+
             permutation = data_utils.make_permute(feature,
                                                   reuse_len=args.reuse_len,
                                                   seq_len=args.seq_len,
@@ -651,10 +673,14 @@ if __name__ == "__main__":
             inp_q = permutation['input_q'].unsqueeze(-1)  # [seq_len, 1(=bsz)]
             tgt_mask = permutation['target_mask'].unsqueeze(-1)  # [num_predict, 1(=bsz)]
 
+            # logits size [seq_len, 1, voc_size]
             logits, new_mems = model(inp_k=inp_k, seg_id=seg_id, input_mask=None,
                                      mems=mems, perm_mask=perm_mask,
                                      target_mapping=target_mapping, inp_q=inp_q)
 
+            #print(logits.size())
+
+            # crossentropy loss accumulated on targeted predictions
             lm_loss = criterion(logits.transpose(1, 2), target).type(torch.float32)
             tgt_mask_sum = tgt_mask.reshape(-1).sum()
             lm_loss_sum = (lm_loss * tgt_mask).reshape(-1).sum()

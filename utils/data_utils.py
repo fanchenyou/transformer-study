@@ -26,16 +26,17 @@ import torch
 import numpy as np
 
 special_symbols = {
-    "[UNK]"  : 0,
-    "[CLS]"  : 1,
-    "[SEP]"  : 2,
-    "[PAD]"  : 3,
-    "[MASK]" : 4,
+    "[UNK]": 0,
+    "[CLS]": 1,
+    "[SEP]": 2,
+    "[PAD]": 3,
+    "[MASK]": 4,
 }
 UNK_ID = special_symbols["[UNK]"]
 CLS_ID = special_symbols["[CLS]"]
 SEP_ID = special_symbols["[SEP]"]
 MASK_ID = special_symbols["[MASK]"]
+
 
 def _split_a_and_b(data, sent_ids, begin_idx, tot_len, extend_target=False):
     """Split two segments from `data` starting from the index `begin_idx`."""
@@ -43,8 +44,8 @@ def _split_a_and_b(data, sent_ids, begin_idx, tot_len, extend_target=False):
     data_len = data.shape[0]
     if begin_idx + tot_len >= data_len:
         print("[_split_a_and_b] returns None: "
-                "begin_idx %d + tot_len %d >= data_len %d",
-                begin_idx, tot_len, data_len)
+              "begin_idx %d + tot_len %d >= data_len %d",
+              begin_idx, tot_len, data_len)
         return None
 
     end_idx = begin_idx + 1
@@ -96,8 +97,8 @@ def _split_a_and_b(data, sent_ids, begin_idx, tot_len, extend_target=False):
     if extend_target:
         if a_end >= data_len or b_end >= data_len:
             print("[_split_a_and_b] returns None: "
-                          "a_end %d or b_end %d >= data_len %d",
-                          a_end, b_end, data_len)
+                  "a_end %d or b_end %d >= data_len %d",
+                  a_end, b_end, data_len)
             return None
         a_target = data[a_begin + 1: a_end + 1]
         b_target = data[b_begin: b_end + 1]
@@ -105,14 +106,16 @@ def _split_a_and_b(data, sent_ids, begin_idx, tot_len, extend_target=False):
 
     return ret
 
+
 def _is_start_piece(piece):
     special_pieces = set(list('!"#$%&\"()*+,-./:;?@[\\]^_`{|}~'))
     piece = ''.join(piece)
     if (piece.startswith("▁") or piece.startswith("<")
-        or piece in special_pieces):
+            or piece in special_pieces):
         return True
     else:
         return False
+
 
 def _sample_mask(sp, seg, mask_alpha, mask_beta,
                  reverse=False, max_gram=5, goal_num_predict=None):
@@ -178,8 +181,9 @@ def _sample_mask(sp, seg, mask_alpha, mask_beta,
 
     return mask
 
+
 def _create_data(sp, input_paths, seq_len, reuse_len,
-                bi_data, num_predict, mask_alpha, mask_beta):
+                 bi_data, num_predict, mask_alpha, mask_beta):
     features = []
 
     f = open(input_paths, 'r')
@@ -209,7 +213,7 @@ def _create_data(sp, input_paths, seq_len, reuse_len,
         tgt = data[0, i + 1: i + reuse_len + 1]
 
         results = _split_a_and_b(
-            data[0], # all line in one Text file.
+            data[0],  # all line in one Text file.
             sent_ids[0],
             begin_idx=i + reuse_len,
             tot_len=seq_len - reuse_len - 3,
@@ -264,6 +268,7 @@ def _create_data(sp, input_paths, seq_len, reuse_len,
     f.close()
     return features
 
+
 def _local_perm(inputs, targets, is_masked, perm_size, seq_len):
     """
     Sample a permutation of the factorization order, and create an
@@ -275,7 +280,7 @@ def _local_perm(inputs, targets, is_masked, perm_size, seq_len):
     is_masked: bool Tensor in shape [seq_len]. True means being selected
       for partial prediction.
     perm_size: the length of longest permutation. Could be set to be reuse_len.
-      Should not be larger than reuse_len or there will be data leaks.
+      Should not be larger than reuse_len or there would be data leaks.
     seq_len: int, sequence length.
     """
 
@@ -286,22 +291,21 @@ def _local_perm(inputs, targets, is_masked, perm_size, seq_len):
     index = index[torch.randperm(index.shape[0])]
     index = torch.reshape(index.t(), [-1])
 
-    # `perm_mask` and `target_mask`
     # non-functional tokens
     non_func_tokens = ~(torch.eq(inputs, SEP_ID) | torch.eq(inputs, CLS_ID))
     non_mask_tokens = (~is_masked) & non_func_tokens.byte()
     masked_or_func_tokens = ~non_mask_tokens
 
-    # Set the permutation indices of non-masked (& non-funcional) tokens to the
+    # Set the permutation indices of non-masked (& non-functional) tokens to the
     # smallest index (-1):
     # (1) they can be seen by all other positions
-    # (2) they cannot see masked positions, so there won"t be information leak
+    # (2) they cannot see masked positions, so there won't be information leak
     smallest_index = -torch.ones([seq_len], dtype=torch.int64)
 
     # put -1 if `non_mask_tokens(real token not cls or sep)` not permutation index
     rev_index = torch.where(non_mask_tokens, smallest_index, index)
 
-    # Create `target_mask`: non-funcional and maksed tokens
+    # Create `target_mask`: non-functional and masked tokens
     # 1: use mask as input and have loss
     # 0: use token (or [SEP], [CLS]) as input and do not have loss
     target_tokens = masked_or_func_tokens & non_func_tokens.byte()
@@ -314,7 +318,7 @@ def _local_perm(inputs, targets, is_masked, perm_size, seq_len):
 
     # 1: cannot attend if i <= j and j is not non-masked (masked_or_func_tokens)
     # 0: can attend if i > j or j is non-masked
-    perm_mask = (self_rev_index[:, None] <= rev_index[None, :]) &  masked_or_func_tokens.bool()
+    perm_mask = (self_rev_index[:, None] <= rev_index[None, :]) & masked_or_func_tokens.bool()
     perm_mask = perm_mask.type(torch.float32)
 
     # new target: [next token] for LM and [curr token] (self) for PLM
@@ -328,24 +332,25 @@ def _local_perm(inputs, targets, is_masked, perm_size, seq_len):
 
     return perm_mask, new_targets, target_mask, inputs_k, inputs_q
 
-def make_permute(feature, reuse_len, seq_len, perm_size, num_predict):
 
+def make_permute(feature, reuse_len, seq_len, perm_size, num_predict):
     inputs = torch.LongTensor(feature.pop("input"))
     target = torch.LongTensor(feature.pop("target"))
     is_masked = torch.ByteTensor(feature.pop("is_masked"))
+    # is_masked = torch.BoolTensor(feature.pop("is_masked"))
 
     non_reuse_len = seq_len - reuse_len
     assert perm_size <= reuse_len and perm_size <= non_reuse_len
 
     perm_mask_0, target_0, target_mask_0, input_k_0, input_q_0 = _local_perm(
-        inputs[:reuse_len], # inp
+        inputs[:reuse_len],  # inp
         target[:reuse_len],
         is_masked[:reuse_len],
         perm_size,
         reuse_len)
 
     perm_mask_1, target_1, target_mask_1, input_k_1, input_q_1 = _local_perm(
-        inputs[reuse_len:], # (senA, seq, senBm seq, cls)
+        inputs[reuse_len:],  # (senA, seq, senBm seq, cls)
         target[reuse_len:],
         is_masked[reuse_len:],
         perm_size,
@@ -364,7 +369,7 @@ def make_permute(feature, reuse_len, seq_len, perm_size, num_predict):
 
     if num_predict is not None:
         indices = torch.arange(seq_len, dtype=torch.int64)
-        bool_target_mask = target_mask.byte()
+        bool_target_mask = target_mask.bool()
         indices = indices[bool_target_mask]
 
         ##### extra padding due to CLS/SEP introduced after prepro
@@ -378,7 +383,8 @@ def make_permute(feature, reuse_len, seq_len, perm_size, num_predict):
         paddings = torch.zeros([pad_len, seq_len], dtype=target_mapping.dtype)
         target_mapping = torch.cat([target_mapping, paddings], dim=0)
         feature["target_mapping"] = torch.reshape(target_mapping,
-                                                [num_predict, seq_len])
+                                                  [num_predict, seq_len])
+
         ##### target
         target = target[bool_target_mask]
         paddings = torch.zeros([pad_len], dtype=target.dtype)
