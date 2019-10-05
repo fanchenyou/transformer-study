@@ -1,20 +1,15 @@
 # source https://github.com/huggingface/transformers/tree/master/transformers
 # doc https://huggingface.co/transformers/model_doc/xlnet.html
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import argparse
+import sys
 
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch
-import numpy as np
 import torch.optim as optim
 from pytorch_pretrained_bert import BertTokenizer
 
-import sys
 
 sys.path.insert(0, './')
 from utils import data_utils
@@ -28,7 +23,7 @@ class XLNet(nn.Module):
         Doc url:
         Args:
 
-        inp_k: int32 Tensor in shape [len, bsz], the input token IDs.
+        inp_k: input. int32 Tensor in shape [len, bsz], the input token IDs.
         seg_id: int32 Tensor in shape [len, bsz], the input segment IDs.
         input_mask: float32 Tensor in shape [len, bsz], the input mask.
           0 for real tokens and 1 for padding.
@@ -44,7 +39,7 @@ class XLNet(nn.Module):
           on the j-th token.
           Only used during pretraining for partial prediction.
           Set to None during finetuning.
-        inp_q: float32 Tensor in shape [len, bsz].
+        inp_q: target_mask, float32 Tensor in shape [len, bsz].
           1 for tokens with losses and 0 for tokens without losses.
           Only used during pretraining for two-stream attention.
           Set to None during finetuning.

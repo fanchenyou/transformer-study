@@ -12,6 +12,8 @@
 .classpath
 .data/
 data/shakespeare
+data/glue_data
+output/*
 .ensime
 .ensime_cache/
 .ensime_lucene

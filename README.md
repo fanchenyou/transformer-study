@@ -13,6 +13,13 @@
     * An excellent tutorial version of XLNet from above link
     * Add more comments for understanding
     * Requirements: Python 3 + Pytorch v1.2 
+    * TODO: Add GPU support
+
+#### 5. Bert, [paper](https://arxiv.org/abs/1810.04805), [src](https://github.com/huggingface/transformers)
+    * Build Bert - Bidirectional Transformer
+    * Utilize official Pytorch API to implement the interface of using existing code and pre-trained model
+    * pip install transformers
+
 
 #### TODO. ALBERT, [paper](https://arxiv.org/abs/1909.11942v1)
     * Lite BERT
