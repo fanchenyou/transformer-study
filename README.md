@@ -18,8 +18,17 @@
 #### 5. Bert, [paper](https://arxiv.org/abs/1810.04805), [src](https://github.com/huggingface/transformers)
     * Build Bert - Bidirectional Transformer
     * Utilize official Pytorch API to implement the interface of using existing code and pre-trained model
-    * pip install transformers
+    * pip install transformers tb-nightly 
 
 
 #### TODO. ALBERT, [paper](https://arxiv.org/abs/1909.11942v1)
     * Lite BERT
+
+
+
+### Requirements
+Python = 3.6+
+ 
+PyTorch = 1.2+ [[here]](https://pytorch.org/)
+
+GPU training with 4G+ memory, testing with 1G+ memory.

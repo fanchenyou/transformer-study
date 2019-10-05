@@ -14,6 +14,7 @@
 data/shakespeare
 data/glue_data
 output/*
+runs/
 .ensime
 .ensime_cache/
 .ensime_lucene
@@ -26,14 +27,6 @@ output/*
 .settings
 /lib/
 OK/
-gif-qa/OK
-gif-qa/extract_features
-gif-qa/data/dataset/*.csv
-gif-qa/data/Vocabulary/*.txt
-gif-qa/data/feats/*.hdf5
-gif-qa/saved_models
-msvd-qa/data/msvd_qa/*.h5
-msvd-qa/saved_models
 R-unit-tests.log
 R/unit-tests.out
 R/cran-check.out

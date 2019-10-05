@@ -6,7 +6,7 @@ step1: download glue data
 cd $HOME/data
 python download_glue_data.py
 
-step2:
+step2: start training
 
 export GLUE_DIR=./data/glue_data
 export TASK_NAME=MRPC
@@ -41,7 +41,8 @@ import torch
 from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
                               TensorDataset)
 from torch.utils.data.distributed import DistributedSampler
-from tensorboardX import SummaryWriter
+#from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
 from transformers import (WEIGHTS_NAME, BertConfig,
