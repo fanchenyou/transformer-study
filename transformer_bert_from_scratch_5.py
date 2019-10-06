@@ -53,7 +53,7 @@ class SublayerConnection(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, sublayer):
-        "Apply residual connection to any sublayer with the same size."
+        """Apply residual connection to any sublayer with the same size."""
         return x + self.dropout(sublayer(self.norm(x)))
 
 
@@ -148,6 +148,9 @@ class BERTLM(nn.Module):
     """
     BERT Language Model
     Next Sentence Prediction Model + Masked Language Model
+
+    Next_Sentence:  2-class classification model : is_next, is_not_next
+    Masked_LanguageModel:  predicting origin token from masked input sequence, n-class classification problem, n-class = vocab_size
     """
 
     def __init__(self, bert, vocab_size):  # (self, bert: BERT, vocab_size):
@@ -158,56 +161,25 @@ class BERTLM(nn.Module):
 
         super(BERTLM, self).__init__()
         self.bert = bert
-        self.next_sentence = NextSentencePrediction(self.bert.hidden)
-        self.mask_lm = MaskedLanguageModel(self.bert.hidden, vocab_size)
+        self.next_sentence = nn.Linear(self.bert.hidden, 2)
+        self.mask_lm = nn.Linear(self.bert.hidden, vocab_size)
+        self.softmax = nn.LogSoftmax(dim=-1)
 
     def forward(self, x, segment_label):
-        x = self.bert(x, segment_label)
-        return self.next_sentence(x), self.mask_lm(x)
-
-
-class NextSentencePrediction(nn.Module):
-    """
-    2-class classification model : is_next, is_not_next
-    """
-
-    def __init__(self, hidden):
-        """
-        :param hidden: BERT model output size
-        """
-        super(NextSentencePrediction, self).__init__()
-        self.linear = nn.Linear(hidden, 2)
-        self.softmax = nn.LogSoftmax(dim=-1)
-
-    def forward(self, x):
-        return self.softmax(self.linear(x[:, 0]))
-
-
-class MaskedLanguageModel(nn.Module):
-    """
-    predicting origin token from masked input sequence
-    n-class classification problem, n-class = vocab_size
-    """
-
-    def __init__(self, hidden, vocab_size):
-        """
-        :param hidden: output size of BERT model
-        :param vocab_size: total vocab size
-        """
-        super(MaskedLanguageModel, self).__init__()
-        self.linear = nn.Linear(hidden, vocab_size)
-        self.softmax = nn.LogSoftmax(dim=-1)
-
-    def forward(self, x):
-        return self.softmax(self.linear(x))
+        x = self.bert(x, segment_label)  # bert encoder
+        x1 = self.softmax(self.next_sentence(x[:, 0]))  # decoder to next_sentence
+        x2 = self.softmax(self.mask_lm(x))              # decoder to mask_lm
+        return x1, x2
 
 
 class BERTTrainer:
     """
+    Ref to [Bert] paper https://arxiv.org/pdf/1810.04805.pdf
+
     BERTTrainer make the pretrained BERT model with two LM training method.
 
-        1. Masked Language Model : 3.3.1 Task #1: Masked LM
-        2. Next Sentence prediction : 3.3.2 Task #2: Next Sentence Prediction
+        1. Masked Language Model :    see [bert] section 3.1 Task #1: Masked LM
+        2. Next Sentence prediction : see [bert] section 3.1 Task #2: Next Sentence Prediction
 
     please check the details on README.md with simple example.
 
@@ -347,12 +319,11 @@ class BERTTrainer:
         return output_path
 
 
-"""
-https://github.com/codertimo/BERT-pytorch/blob/master/bert_pytorch/__main__.py
-"""
-
-
 def main():
+    """
+    https://github.com/codertimo/BERT-pytorch/blob/master/bert_pytorch/__main__.py
+    """
+
     parser = argparse.ArgumentParser()
 
     parser.add_argument("-c", "--train_dataset", required=True, type=str, help="train dataset for train bert")
@@ -382,6 +353,9 @@ def main():
 
     args = parser.parse_args()
 
+    ########################################
+    ## in step 1, we prepared the vocab file
+    ########################################
     print("Loading Vocab", args.vocab_path)
     vocab = WordVocab.load_vocab(args.vocab_path)
     print("Vocab Size: ", len(vocab))

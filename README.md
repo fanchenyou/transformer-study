@@ -15,10 +15,14 @@
     * Requirements: Python 3 + Pytorch v1.2 
     * TODO: Add GPU support
 
-#### 5. Bert from scatch, [paper](https://arxiv.org/abs/1810.04805), [src](https://github.com/codertimo/BERT-pytorch/tree/master/bert_pytorch/model)
+#### 5. Bert from scratch, [paper](https://arxiv.org/abs/1810.04805), [src](https://github.com/codertimo/BERT-pytorch/tree/master/bert_pytorch/model)
     * Build Bert - Bidirectional Transformer
-    * Utilize official Pytorch API to implement the interface of using existing code and pre-trained model
-    * pip install transformers tb-nightly 
+    * The task is two-fold, see paper section 3.1
+        1) to predict the second part of a sentence (Next Sentence Prediction)
+        2) to predict the masked words of a sentence (Masked LM)
+    * step 1: generate vocabulary file "vocab.small" in ./data
+    * step 2: train the network
+    * See transformer_bert_from_scratch_5.py for more details.
 
 #### 6. Bert from Pytorch Official Implementation, [paper](https://arxiv.org/abs/1810.04805), [src](https://github.com/huggingface/transformers)
     * Build Bert - Bidirectional Transformer
