@@ -4,6 +4,10 @@ import torch
 from torch.utils.data import Dataset
 
 """
+This is Dataset class which reads in a text file with each line of two segments, defined as
+The format def can be found here https://github.com/codertimo/BERT-pytorch#0-prepare-your-corpus
+Refer to transformer_bert_from_scratch_5.py for usage.
+
 https://github.com/codertimo/BERT-pytorch/blob/master/bert_pytorch/dataset/dataset.py
 """
 
@@ -70,10 +74,16 @@ class BERTDataset(Dataset):
 
         for i, token in enumerate(tokens):
             prob = random.random()
+
+            # see bert paper section 3
+            # 15% task is mask_lm
             if prob < 0.15:
                 prob /= 0.15
 
                 # 80% randomly change token to mask token
+                # refer to bert paper section 3.1, mask_lm task
+                # "If the i-th token is chosen, we replace
+                # the i-th token with (1) the [MASK] token 80% of the time"
                 if prob < 0.8:
                     tokens[i] = self.vocab.mask_index
 
@@ -109,7 +119,7 @@ class BERTDataset(Dataset):
             line = self.file.__next__()
             if line is None:
                 self.file.close()
-                self.file = open(self.corpus_path, "r") #, encoding=self.encoding)
+                self.file = open(self.corpus_path, "r")
                 line = self.file.__next__()
 
             t1, t2 = line[:-1].split("\t")
@@ -122,7 +132,7 @@ class BERTDataset(Dataset):
         line = self.file.__next__()
         if line is None:
             self.file.close()
-            self.file = open(self.corpus_path, "r") # , encoding=self.encoding)
+            self.file = open(self.corpus_path, "r")
             for _ in range(random.randint(self.corpus_lines if self.corpus_lines < 1000 else 1000)):
                 self.random_file.__next__()
             line = self.random_file.__next__()

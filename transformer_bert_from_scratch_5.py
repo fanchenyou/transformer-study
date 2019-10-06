@@ -167,8 +167,13 @@ class BERTLM(nn.Module):
 
     def forward(self, x, segment_label):
         x = self.bert(x, segment_label)  # bert encoder
-        x1 = self.softmax(self.next_sentence(x[:, 0]))  # decoder to next_sentence
-        x2 = self.softmax(self.mask_lm(x))              # decoder to mask_lm
+
+        # decoder to next_sentence, use the first hidden output as classifier input
+        # see http://jalammar.github.io/illustrated-bert/
+        x1 = self.softmax(self.next_sentence(x[:, 0]))
+
+        # decoder to mask_lm
+        x2 = self.softmax(self.mask_lm(x))
         return x1, x2
 
 
@@ -222,7 +227,7 @@ class BERTTrainer:
         self.train_data = train_dataloader
         self.test_data = test_dataloader
 
-        # Setting the Adam optimizer with hyper-param
+        # Setting the Adam optimizer with hyper-param and warm-up, see utils/optim_schedule.py
         self.optim = Adam(self.model.parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
         self.optim_schedule = ScheduledOptim(self.optim, self.bert.hidden, n_warmup_steps=warmup_steps)
 

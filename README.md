@@ -15,7 +15,7 @@
     * Requirements: Python 3 + Pytorch v1.2 
     * TODO: Add GPU support
 
-#### 5. Bert from scratch, [paper](https://arxiv.org/abs/1810.04805), [src](https://github.com/codertimo/BERT-pytorch/tree/master/bert_pytorch/model)
+#### 5. Bert from scratch, [paper](https://arxiv.org/abs/1810.04805), [src](https://github.com/codertimo/BERT-pytorch/tree/master/bert_pytorch/model), [tutorial](https://towardsdatascience.com/bert-explained-state-of-the-art-language-model-for-nlp-f8b21a9b6270)
     * Build Bert - Bidirectional Transformer
     * The task is two-fold, see paper section 3.1
         1) to predict the second part of a sentence (Next Sentence Prediction)
