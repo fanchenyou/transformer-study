@@ -1,0 +1,57 @@
+what am I holding	can
+what is the object placed beside the man in green shirt	laptop
+what is the object placed behind the man in green shirt	bike
+what is the man in front of me doing	eat salad
+what am I holding	can
+what is the man in front of me doing	drink
+what is the man in front of me holding	bottle
+what is the man in green shirt holding	bottle
+what is the man in front of me doing	eat salad
+what is the man in front of me doing	eat salad
+what is the man in front of me doing	drink
+what is the color of the bottle hold by the man in front of me	red
+what is the man in front of me doing	eat salad
+what is the man in front of me doing	mix salad
+who is eating salad	the man in green shirt
+what am I holding	can
+what am I holding	can
+what is the man in front of me doing	drink
+what is the man in front of me holding	bottle
+what is the man in green shirt holding	bottle
+what is the man in front of me doing	eat salad
+what is the man in front of me doing	eat salad
+what is the man in front of me doing	drink
+what is the color of the bottle hold by the man in front of me	red
+what is the man in front of me doing	eat salad
+what is the man in front of me doing	mix salad
+what is the man in gray clothes doing	drink
+what is the man in black clothes holding	snack
+what is placed on the desk	monitor and computer
+what is the man in black clothes doing	have snack
+what is behind the desktop computer	whiteboard
+where is the man entering the room	the door on my right side
+how many people can I see in the scene	three
+who is sitting in front of the monitor	the man in gray clothes
+who is sitting near the door	the man in gray clothes
+who is sitting in front of the laptop	the man in gray clothes
+what is the man on my left side passing to the man on my right side	snack
+what is the man on my right side passing to the man on my left side	snack
+what is the color of the cup holding by the man in gray clothes	green
+what is the color of the cup holding by the man in black clothes	red
+what is the color of the snack bag hold by the man in front of me	brown
+what is the man in black clothes doing	drink
+what am I holding in hands	phone
+what am I looking at	phone
+what are we looking at	phone
+what are we doing	look at phone
+what are we doing	look at phone
+how many people can I see in the scene	two
+who is standing beside the door	the man in gray clothes
+who is sitting in front of the monitor	the man in gray clothes
+who is holding snack bag	the man in black jacket
+who is holding snack bag	the man in gray clothes
+who is holding a red cup 	the man in black jacket
+what is the color of the cup hold by the man in black jacket	red
+what am I holding in hands	bottle
+how many people can I see in the scene	two
+how many people can I see in the scene	three
