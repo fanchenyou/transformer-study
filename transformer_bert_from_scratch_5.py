@@ -3,8 +3,9 @@
 """
 src: https://github.com/codertimo/BERT-pytorch/tree/master/bert_pytorch/model
 
-The task is to predict (fill) the second part of a sentence.
-So this is a seq2seq problem.
+The task is two-fold, see paper section 3.1
+1) to predict the second part of a sentence (Next Sentence Prediction)
+2) to predict the masked words of a sentence (Masked LM)
 
 step 0 (optional): Let's prepare the dataset first.
 The format def can be found here https://github.com/codertimo/BERT-pytorch#0-prepare-your-corpus
@@ -19,7 +20,6 @@ python ./utils/vocab.py -c data/qa_pair.txt -o data/vocab.small
 step 2: train the network
 python transformer_bert_from_scratch_5.py \
 -c data/qa_pair.txt -v data/vocab.small -o output/bert.model
-
 
 """
 
