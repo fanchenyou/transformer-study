@@ -15,7 +15,7 @@
     * Requirements: Python 3 + Pytorch v1.2 
     * TODO: Add GPU support
 
-#### 5. Bert, [paper](https://arxiv.org/abs/1810.04805), [src](https://github.com/codertimo/BERT-pytorch/tree/master/bert_pytorch/model)
+#### 5. Bert from scatch, [paper](https://arxiv.org/abs/1810.04805), [src](https://github.com/codertimo/BERT-pytorch/tree/master/bert_pytorch/model)
     * Build Bert - Bidirectional Transformer
     * Utilize official Pytorch API to implement the interface of using existing code and pre-trained model
     * pip install transformers tb-nightly 
