@@ -1,7 +1,8 @@
 ## Several Transformer network variants tutorials
 
-#### 1. transformer_encoder, [src](https://pytorch.org/tutorials/beginner/transformer_tutorial.html)
+#### 1. transformer_encoder, [paper](https://arxiv.org/pdf/1706.03762.pdf), [src](https://pytorch.org/tutorials/beginner/transformer_tutorial.html), [tutorial](https://pytorch.org/tutorials/beginner/transformer_tutorial.html)
     * Use Pytorch nn.transformer package to build an encoder for language prediction
+    * PyTorch 1.2 + TorchText
    
 #### 2. transformer_xl_from_scratch, [src](https://mlexplained.com/2019/07/04/building-the-transformer-xl-from-scratch/)
     * Build Transformer + XLNet
