@@ -92,10 +92,6 @@ class TransformerModel(nn.Module):
 # tokens into tensors. Starting from sequential data, the ``batchify()``
 # function arranges the dataset into columns, trimming off any tokens remaining
 # after the data has been divided into batches of size ``batch_size``.
-# For instance, with the alphabet as the sequence (total length of 26)
-# and a batch size of 4, we would divide the alphabet into 4 sequences of
-# length 6:
-#
 
 
 TEXT = torchtext.data.Field(tokenize=get_tokenizer("basic_english"),
