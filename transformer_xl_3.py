@@ -1,11 +1,16 @@
-# https://mlexplained.com/2019/07/04/building-the-transformer-xl-from-scratch/
-# https://github.com/keitakurita/Practical_NLP_in_PyTorch/blob/master/deep_dives/transformer_xl_from_scratch.ipynb
+"""
+This is a tutorial on how to define a simple XLNet which has a single
+attention head from scratch.
+
+tutorial https://mlexplained.com/2019/07/04/building-the-transformer-xl-from-scratch/
+src https://github.com/keitakurita/Practical_NLP_in_PyTorch/blob/master/deep_dives/transformer_xl_from_scratch.ipynb
+"""
 
 import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 
-device = torch.device("cuda:1")
+device = torch.device("cpu") if not torch.cuda.is_available() else torch.device("cuda:0")
 
 
 class PositionalEmbedding(nn.Module):
@@ -18,7 +23,7 @@ class PositionalEmbedding(nn.Module):
         # along with the model
         self.register_buffer("inv_freq", inv_freq)
 
-    def forward(self, positions # (seq, )
+    def forward(self, positions  # (seq, )
                 ):
         # outer product
         sinusoid_inp = torch.einsum("i,j->ij", positions.float(), self.inv_freq)
@@ -64,12 +69,12 @@ class MultiHeadAttention(nn.Module):
                 .view(x.size(1) + 1, x.size(0), *x.size()[2:])[1:]
                 .view_as(x))
 
-    def forward(self, input_, # (cur_seq, b, d_in)
+    def forward(self, input_,  # (cur_seq, b, d_in)
                 pos_embs,  # (cur_seq + prev_seq, d_in)
                 memory,  # (prev_seq, b, d_in)
                 u,  # (H, d)
                 v,  # (H, d)
-                mask= None,
+                mask=None,
                 ):
         """
         pos_embs: we pass the positional embeddings in separately
@@ -159,13 +164,13 @@ x1 = mha(inpt, pos, mem, u, v)
 
 print(x1.shape)
 
-
-
 '''Building the decoder
 
 To construct the decoder block, all we need in addition to the MultiHeadAttention layer 
 is the Positionwise Feed Forward layer.
 '''
+
+
 class PositionwiseFF(nn.Module):
     def __init__(self, d_input, d_inner, dropout):
         super(PositionwiseFF, self).__init__()
@@ -181,8 +186,8 @@ class PositionwiseFF(nn.Module):
         )
         self.layer_norm = nn.LayerNorm(d_input)
 
-    def forward(self, input_, #: torch.FloatTensor, # (cur_seq, bs, d_input)
-               ): # -> torch.FloatTensor: # (cur_seq, bs, d_input)
+    def forward(self, input_,  #: torch.FloatTensor, # (cur_seq, bs, d_input)
+                ):  # -> torch.FloatTensor: # (cur_seq, bs, d_input)
         ff_out = self.ff(input_)
         output = self.layer_norm(input_ + ff_out)
         return output
@@ -197,15 +202,14 @@ class DecoderBlock(nn.Module):
                                       dropout=dropout, dropouta=dropouta)
         self.ff = PositionwiseFF(d_input, d_ff_inner, dropout)
 
-    def forward(self, input_, #: torch.FloatTensor,  # (cur_seq, bs, d_input)
-                pos_embs,#: torch.FloatTensor,  # (cur_seq + prev_seq, d_input),
-                u,#: torch.FloatTensor,  # (H, d_input),
-                v,#: torch.FloatTensor,  # (H, d_input),
+    def forward(self, input_,  #: torch.FloatTensor,  # (cur_seq, bs, d_input)
+                pos_embs,  #: torch.FloatTensor,  # (cur_seq + prev_seq, d_input),
+                u,  #: torch.FloatTensor,  # (H, d_input),
+                v,  #: torch.FloatTensor,  # (H, d_input),
                 mask=None,
                 mems=None,
                 ):
         return self.ff(self.mha(input_, pos_embs, mems, u, v, mask=mask))
-
 
 
 '''The full Transformer XL
@@ -220,7 +224,7 @@ class StandardWordEmbedding(nn.Module):
         self.embedding = nn.Embedding(num_embeddings, embedding_dim)
         self.scale = embedding_dim ** 0.5
 
-    def forward(self, input_): #: torch.LongTensor):
+    def forward(self, input_):  #: torch.LongTensor):
         return self.embedding(input_) * self.scale
 
 
@@ -254,12 +258,12 @@ class TransformerXL(nn.Module):
         self.u, self.v = (nn.Parameter(torch.Tensor(self.n_heads, self.d_head_inner)),
                           nn.Parameter(torch.Tensor(self.n_heads, self.d_head_inner)))
 
-    def init_memory(self, device=torch.device("cpu")): # -> torch.FloatTensor:
+    def init_memory(self, device=torch.device("cpu")):  # -> torch.FloatTensor:
         return [torch.empty(0, dtype=torch.float).to(device) for _ in range(self.n_layers + 1)]
 
     def update_memory(self,
-                      previous_memory,#: List[torch.FloatTensor],
-                      hidden_states,#: List[torch.FloatTensor],
+                      previous_memory,  #: List[torch.FloatTensor],
+                      hidden_states,  #: List[torch.FloatTensor],
                       ):
         assert len(hidden_states) == len(previous_memory)
         mem_len, seq_len = previous_memory[0].size(0), hidden_states[0].size(0)
@@ -281,10 +285,10 @@ class TransformerXL(nn.Module):
         self.seq_len = seq_len
         self.mem_len = mem_len
 
-    def forward(self, idxs, #: torch.LongTensor,  # (cs, bs)
-                target, #: torch.LongTensor,  # (cs, bs)
-                memory=None, #: Optional[List[torch.FloatTensor]] = None,
-                ): # -> Dict[str, torch.Tensor]:
+    def forward(self, idxs,  #: torch.LongTensor,  # (cs, bs)
+                target,  #: torch.LongTensor,  # (cs, bs)
+                memory=None,  #: Optional[List[torch.FloatTensor]] = None,
+                ):  # -> Dict[str, torch.Tensor]:
         if memory is None:
             memory = self.init_memory(idxs.device)
         assert len(memory) == len(self.layers) + 1
@@ -317,9 +321,6 @@ class TransformerXL(nn.Module):
         # and we do not back propagate through them
         new_memory = self.update_memory(memory, hidden_states)
         return {"loss": loss, "logits": logits, "memory": new_memory}
-
-
-
 
 
 transformer = TransformerXL(1000, 4, 3, 32, 17, 71, mem_len=5).to(device)
