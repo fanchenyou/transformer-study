@@ -5,7 +5,7 @@
     * PyTorch 1.2 + TorchText
    
 #### 2. transformer_xl_from_scratch, [src](https://mlexplained.com/2019/07/04/building-the-transformer-xl-from-scratch/)
-    * Build Transformer + XLNet
+    * A simple toy example showing the idea of Transformer-XL which uses additional memory to encode history
     
 #### 3. transformer_xl_multihead, [src](https://mlexplained.com/2019/07/04/building-the-transformer-xl-from-scratch/)
     * Build Transformer + XLNet + MultiAttention heads
