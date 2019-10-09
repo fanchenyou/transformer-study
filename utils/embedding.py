@@ -8,7 +8,6 @@ BERT Embedding which is consisted with under features
 src: https://github.com/codertimo/BERT-pytorch/tree/master/bert_pytorch/model/embedding
 """
 
-
 import math
 import torch
 import torch.nn as nn
@@ -24,6 +23,7 @@ class SegmentEmbedding(nn.Embedding):
         super(SegmentEmbedding, self).__init__(3, embed_size, padding_idx=0)
 
 
+# used in Transformer and BERT
 class PositionalEmbedding(nn.Module):
 
     def __init__(self, d_model, max_len=512):
@@ -71,3 +71,21 @@ class BERTEmbedding(nn.Module):
     def forward(self, sequence, segment_label):
         x = self.token(sequence) + self.position(sequence) + self.segment(segment_label)
         return self.dropout(x)
+
+
+# used in Transformer-XL and XLNet
+class RelativePositionalEmbedding(nn.Module):
+    def __init__(self, d):
+        super(PositionalEmbedding, self).__init__()
+        self.d = d
+        inv_freq = 1 / (10000 ** (torch.arange(0.0, d, 2.0) / d))
+        # register buffer tells pytorch that this tensor is part of the model
+        # this means that it will be saved in the state_dict and moved to the GPU
+        # along with the model
+        self.register_buffer("inv_freq", inv_freq)
+
+    def forward(self, positions):  # input size (seq, )
+        # outer product
+        sinusoid_inp = torch.einsum("i,j->ij", positions.float(), self.inv_freq)
+        pos_emb = torch.cat([sinusoid_inp.sin(), sinusoid_inp.cos()], dim=-1)
+        return pos_emb[:, None, :]
