@@ -11,6 +11,7 @@
 .cache
 .classpath
 .data/
+data/*.zip
 data/shakespeare
 data/glue_data
 data/vocab*

@@ -1,10 +1,8 @@
 """
-This is a tutorial on how to define a simple XLNet which has a single
-attention head from scratch.
+This is a tutorial on how to define Transformer-XL model.
 
 
-tutorial: https://mlexplained.com/2019/07/04/building-the-transformer-xl-from-scratch/
-code: https://github.com/keitakurita/Practical_NLP_in_PyTorch/blob/master/deep_dives/transformer_xl_from_scratch.ipynb
+src: https://mlexplained.com/2019/07/04/building-the-transformer-xl-from-scratch/
 
 """
 import torch

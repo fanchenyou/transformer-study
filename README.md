@@ -4,12 +4,13 @@
     * Use Pytorch nn.transformer package to build an encoder for language prediction
     * PyTorch 1.2 + TorchText
    
-#### 2. transformer_xl_from_scratch, [src](https://mlexplained.com/2019/07/04/building-the-transformer-xl-from-scratch/)
-    * A simple toy example showing the idea of Transformer-XL which uses additional memory to encode history
-    
-#### 3. transformer_xl_multihead, [src](https://mlexplained.com/2019/07/04/building-the-transformer-xl-from-scratch/)
-    * Build Transformer + XLNet + MultiAttention heads
+#### 2 & 2.1. transformer_xl_from_scratch, [src](https://mlexplained.com/2019/07/04/building-the-transformer-xl-from-scratch/)
+    * 2. simple toy example showing the idea of Transformer-XL which uses additional memory to encode history    
+    * 2.1 Build Transformer-XL + MultiAttention heads
 
+#### 3. transformer_xl full release, [src](https://github.com/kimiyoung/transformer-xl/tree/master/pytorch)
+    * Full release of Transformer-XL
+    
 #### 4. xlnet, [paper](https://arxiv.org/pdf/1906.08237.pdf), [src](https://github.com/graykode/xlnet-Pytorch), [tutorial](https://towardsdatascience.com/what-is-xlnet-and-why-it-outperforms-bert-8d8fce710335)
     * An excellent tutorial version of XLNet from above link
     * Add more comments for understanding
