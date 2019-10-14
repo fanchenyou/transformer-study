@@ -9,7 +9,7 @@
     * 2.1 Build Transformer-XL + MultiAttention heads
 
 #### 3. transformer_xl full release, [src](https://github.com/kimiyoung/transformer-xl/tree/master/pytorch)
-    * Full release of Transformer-XL
+    * TODO: Full release of Transformer-XL
     
 #### 4. xlnet, [paper](https://arxiv.org/pdf/1906.08237.pdf), [src](https://github.com/graykode/xlnet-Pytorch), [tutorial](https://towardsdatascience.com/what-is-xlnet-and-why-it-outperforms-bert-8d8fce710335)
     * An excellent tutorial version of XLNet from above link

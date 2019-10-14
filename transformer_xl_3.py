@@ -12,696 +12,569 @@ bash getdata.sh
 python ./utils/vocab.py -c data/qa_pair.txt -o data/vocab.small
 
 step 2: train the network
-python transformer_bert_from_scratch_5.py \
--c data/qa_pair.txt -v data/vocab.small -o output/bert.model
+
+
+python train.py --cuda --data ./data/enwik8/ \
+        --dataset enwik8 \
+        --n_layer 12 \
+        --d_model 512 \
+        --n_head 8 \
+        --d_head 64 \
+        --d_inner 2048 \
+        --dropout 0.1 \
+        --dropatt 0.0 \
+        --optim adam \
+        --lr 0.00025 \
+        --warmup_step 0 \
+        --max_step 400000 \
+        --tgt_len 512 \
+        --mem_len 512 \
+        --eval_tgt_len 128 \
+        --batch_size 22 \
+        --multi_gpu \
+        --gpu0_bsz 4 \
+
+
+    python eval.py \
+        --cuda \
+        --data ../data/enwik8/ \
+        --dataset enwik8 \
+        --tgt_len 80 \
+        --mem_len 2100 \
+        --clamp_len 820 \
+        --same_length \
+        --split test
 
 """
+
+
+# coding: utf-8
 import argparse
-import sys
+import time
+import math
+import os, sys
+import itertools
+
+import numpy as np
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
-from pytorch_pretrained_bert import BertTokenizer
-
-
-sys.path.insert(0, './')
-from utils import data_utils
-
-
-class XLNet(nn.Module):
-    """
-        Defines a Transformer-XL computation graph with additional
-        support for XLNet.
-
-        Doc url:
-        Args:
-
-        inp_k: input. int32 Tensor in shape [len, bsz], the input token IDs.
-        seg_id: int32 Tensor in shape [len, bsz], the input segment IDs.
-        input_mask: float32 Tensor in shape [len, bsz], the input mask.
-          0 for real tokens and 1 for padding.
-        mems: a list of float32 Tensors in shape [mem_len, bsz, d_model], memory
-          from previous batches. The length of the list equals n_layer.
-          If None, no memory is used.
-        perm_mask: float32 Tensor in shape [len, len, bsz].
-          If perm_mask[i, j, k] = 0, i attend to j in batch k;
-          if perm_mask[i, j, k] = 1, i does not attend to j in batch k.
-          If None, each position attends to all the others.
-        target_mapping: float32 Tensor in shape [num_predict, len, bsz].
-          If target_mapping[i, j, k] = 1, the i-th predict in batch k is
-          on the j-th token.
-          Only used during pretraining for partial prediction.
-          Set to None during finetuning.
-        inp_q: target_mask, float32 Tensor in shape [len, bsz].
-          1 for tokens with losses and 0 for tokens without losses.
-          Only used during pretraining for two-stream attention.
-          Set to None during finetuning.
-
-        n_layer: int, the number of layers.
-        d_model: int, the hidden size.
-        n_head: int, the number of attention heads.
-        d_head: int, the dimension size of each attention head.
-        d_inner: int, the hidden size in feed-forward layers.
-        ff_activation: str, "relu" or "gelu".
-        n_token: int, the vocab size.
-
-        dropout: float, dropout rate.
-        dropatt: float, dropout rate on attention probabilities.
-
-        mem_len: int, the number of tokens to cache.
-        reuse_len: int, the number of tokens in the currect batch to be cached
-          and reused in the future.
-        bi_data: bool, whether to use bidirectional input pipeline.
-          Usually set to True during pretraining and False during finetuning.
-        clamp_len: int, clamp all relative distances larger than clamp_len.
-          -1 means no clamping.
-
-      """
-
-    def __init__(self, n_token, n_layer, n_head, d_head, d_inner, d_model, dropout, dropatt,
-                 attn_type, bi_data, clamp_len, same_length, reuse_len, mem_len):
-        super(XLNet, self).__init__()
-
-        self.n_token = n_token
-        self.n_layer = n_layer
-        self.n_head = n_head
-        self.d_head = d_head
-        self.d_inner = d_inner
-        self.d_model = d_model
-        self.dropout = dropout
-        self.dropatt = dropatt
-        self.bi_data = bi_data
-        self.clamp_len = clamp_len
-        self.same_length = same_length
-        self.reuse_len = reuse_len
-        self.mem_len = mem_len
-        self.attn_type = attn_type
-
-        self.embedding = nn.Embedding(n_token, d_model)
-        self.Dropout = nn.Dropout(p=dropout)
-        self.DropAttn = nn.Dropout(p=dropatt)
-
-        self.r_w_bias = nn.Parameter(torch.randn(self.n_layer, self.n_head, self.d_head))
-        self.r_r_bias = nn.Parameter(torch.randn(self.n_layer, self.n_head, self.d_head))
-
-        ##### Segment embedding
-        self.r_s_bias = nn.Parameter(torch.randn(self.n_layer, self.n_head, self.d_head))
-
-        self.seg_embed = nn.Parameter(torch.randn(self.n_layer, 2, self.n_head, self.d_head))
-
-        self.mask_emb = nn.Parameter(torch.randn(1, 1, d_model))
-
-        # post-attention projection (back to `d_model`)
-        self.proj_o = nn.Parameter(torch.randn(self.d_model, self.n_head, self.d_head))
-
-        #### Project hidden states to a specific head with a 4D-shape.
-        self.q_proj_weight = nn.Parameter(torch.randn(self.d_model,
-                                                      self.n_head, self.d_head))
-        self.k_proj_weight = nn.Parameter(torch.randn(self.d_model,
-                                                      self.n_head, self.d_head))
-        self.v_proj_weight = nn.Parameter(torch.randn(self.d_model,
-                                                      self.n_head, self.d_head))
-        self.r_proj_weight = nn.Parameter(torch.randn(self.d_model,
-                                                      self.n_head, self.d_head))
-
-        self.layer_norm = nn.LayerNorm(d_model)
 
-        self.conv1 = nn.Linear(d_model, d_inner)
-        self.conv2 = nn.Linear(d_inner, d_model)
-        self.relu = nn.ReLU(inplace=True)
-
-        self.softmax_b = nn.Parameter(torch.zeros(self.n_token))
-
-
-    def rel_shift(self, x, klen=-1):
-        """perform relative shift to form the relative attention score."""
-        x_size = x.shape
-
-        x = torch.reshape(x, [x_size[1], x_size[0], x_size[2], x_size[3]])
-        #x = x[1:, 0:, 0:, 0:]  # tf.slice(x, [1, 0, 0, 0], [-1, -1, -1, -1])
-        x = x[1:, ...]
-        x = torch.reshape(x, [x_size[0], x_size[1] - 1, x_size[2], x_size[3]])
-        #x = x[0:, 0:klen, 0:, 0:]  # tf.slice(x, [0, 0, 0, 0], [-1, klen, -1, -1])
-        x = torch.index_select(x, 1, torch.arange(klen, device=x.device, dtype=torch.long))
-
-        return x
-
-    def positionwise_ffn(self, inp, activation_type='gelu'):
-
-        """Position-wise Feed-forward Network."""
-        output = self.conv1(inp)
-        output = self.Dropout(output)
-        if activation_type == 'relu':
-            output = self.relu(output)
-        elif activation_type == 'gelu':
-            #output = self.gelu(output)
-            output = F.gelu(output)
-        else:
-            raise ValueError('Unsupported activation type {}'.format(activation_type))
-
-        output = self.layer_norm(output + inp)
-        return output
-
-    def post_attention(self, h, attn_vec, residual=True):
-        """Post-attention processing."""
-
-        # post-attention projection (back to `d_model`)
-        attn_out = torch.einsum('ibnd,hnd->ibh', attn_vec, self.proj_o)
-
-        attn_out = self.Dropout(attn_out)
-        if residual:
-            output = self.layer_norm(attn_out + h)
-        else:
-            output = self.layer_norm(attn_out)
-
-        return output
-
-    def head_projection(self, h, name):
-        """Project hidden states to a specific head with a 4D-shape."""
-
-        if name == 'q':
-            proj_weight = self.q_proj_weight
-        elif name == 'k':
-            proj_weight = self.k_proj_weight
-        elif name == 'v':
-            proj_weight = self.v_proj_weight
-        elif name == 'r':
-            proj_weight = self.r_proj_weight
-        else:
-            raise ValueError('Unknown `name` {}.'.format(name))
-
-        head = torch.einsum('ibh,hnd->ibnd', h, proj_weight)
-
-        return head
-
-    def rel_attn_core(self, q_head, k_head_h, v_head_h, k_head_r, seg_embed, seg_mat,
-                      r_w_bias, r_r_bias, r_s_bias, attn_mask, scale):
-
-        """Core relative positional attention operations."""
-        # https://github.com/huggingface/pytorch-transformers/blob/master/pytorch_transformers/modeling_xlnet.py#L242
-        # more details https://mlexplained.com/2019/07/04/building-the-transformer-xl-from-scratch/
-
-        # content based attention score
-        ac = torch.einsum('ibnd,jbnd->ijbn', q_head + r_w_bias, k_head_h)
-
-        # position based attention score
-        bd = torch.einsum('ibnd,jbnd->ijbn', q_head + r_r_bias, k_head_r)
-        bd = self.rel_shift(bd, klen=ac.shape[1])
-
-        # segment based attention score
-        if seg_mat is None:
-            ef = 0
-        else:
-            ef = torch.einsum('ibnd,snd->ibns', q_head + r_s_bias, seg_embed)
-            ef = torch.einsum('ijbs,ibns->ijbn', seg_mat, ef)
-
-        # merge attention scores and perform masking
-        attn_score = (ac + bd + ef) * scale
-        if attn_mask is not None:
-            # attn_score = attn_score * (1 - attn_mask) - 1e30 * attn_mask
-            attn_score = attn_score - 1e30 * attn_mask
-
-        # attention probability
-        attn_prob = F.softmax(attn_score, dim=1)
-        attn_prob = self.DropAttn(attn_prob)
-
-        # attention output
-        attn_vec = torch.einsum('ijbn,jbnd->ibnd', attn_prob, v_head_h)
-
-        return attn_vec
-
-    def rel_multihead_attn(self, h, r, r_w_bias, r_r_bias, seg_mat, r_s_bias, seg_embed,
-                           attn_mask, mems, d_model, n_head, d_head, dropout, dropatt):
-        """Multi-head attention with relative positional encoding."""
-
-        scale = 1 / (d_head ** 0.5)
-        if mems is not None and len(mems.size()) > 1:
-            cat = torch.cat([mems, h], dim=0)
-        else:
-            cat = h
-
-        # content heads
-        q_head_h = self.head_projection(h, 'q')
-        k_head_h = self.head_projection(cat, 'k')
-        v_head_h = self.head_projection(cat, 'v')
-
-        # positional heads
-        k_head_r = self.head_projection(r, 'r')
-
-        # core attention ops
-        attn_vec = self.rel_attn_core(
-            q_head_h, k_head_h, v_head_h, k_head_r, seg_embed, seg_mat, r_w_bias,
-            r_r_bias, r_s_bias, attn_mask, scale)
-
-        # post processing
-        output = self.post_attention(h, attn_vec)
-
-        return output
-
-    def two_stream_rel_attn(self, h, g, r, mems, r_w_bias, r_r_bias, seg_mat, r_s_bias,
-                            seg_embed, attn_mask_h, attn_mask_g, target_mapping):
-        '''
-        Call in Line 528, for each layer_i
-        output_h, output_g = self.two_stream_rel_attn(
-            h=output_h,
-            g=output_g,
-            r=pos_emb,
-            r_w_bias=self.r_w_bias[i],
-            r_r_bias=self.r_r_bias[i],
-            seg_mat=seg_mat,
-            r_s_bias=r_s_bias_i,
-            seg_embed=seg_embed_i,
-            attn_mask_h=non_tgt_mask,
-            attn_mask_g=attn_mask,
-            mems=mems[i],
-            target_mapping=target_mapping)
-        '''
-
-
-        scale = 1 / (self.d_head ** 0.5)
-
-        # content based attention score
-        if mems is not None and len(mems.size()) > 1:
-            cat = torch.cat([mems, h], dim=0)
-        else:
-            cat = h
-
-        # content-based key head
-        k_head_h = self.head_projection(cat, 'k')
-
-        # content-based value head
-        v_head_h = self.head_projection(cat, 'v')
-
-        # position-based key head
-        k_head_r = self.head_projection(r, 'r')
-
-        ##### h-stream
-        # content-stream query head
-        q_head_h = self.head_projection(h, 'q')
-
-        # core attention ops
-        # h^(m)_zt = LayerNorm(h^(m-1)_zt + RelAttn(h^(m-1)_zt + [h~^(m-1), hT(m-1)_z<=t]))
-        attn_vec_h = self.rel_attn_core(
-            q_head_h, k_head_h, v_head_h, k_head_r, seg_embed, seg_mat, r_w_bias,
-            r_r_bias, r_s_bias, attn_mask_h, scale)
-
-        # post processing
-        output_h = self.post_attention(h, attn_vec_h)
-
-        ##### g-stream
-        # query-stream query head
-        q_head_g = self.head_projection(g, 'q')
-
-        # core attention ops
-        # g^(m)_zt = LayerNorm(g^(m-1)_zt + RelAttn(g^(m-1)_zt + [h~^(m-1), hT(m-1)_z<=t]))
-        if target_mapping is not None:
-            q_head_g = torch.einsum('mbnd,mlb->lbnd', q_head_g, target_mapping)
-            attn_vec_g = self.rel_attn_core(
-                q_head_g, k_head_h, v_head_h, k_head_r, seg_embed, seg_mat, r_w_bias,
-                r_r_bias, r_s_bias, attn_mask_g, scale)
-            attn_vec_g = torch.einsum('lbnd,mlb->mbnd', attn_vec_g, target_mapping)
-        else:
-            attn_vec_g = self.rel_attn_core(
-                q_head_g, k_head_h, v_head_h, k_head_r, seg_embed, seg_mat, r_w_bias,
-                r_r_bias, r_s_bias, attn_mask_g, scale)
-
-        # post processing
-        output_g = self.post_attention(g, attn_vec_g)
-
-        return output_h, output_g
-
-    def _create_mask(self, qlen, mlen, dtype, same_length=False):
-        """create causal attention mask."""
-        # [[0,1,1],
-        #  [0,0,1],
-        #  [0,0,0]]
-        """
-        https://github.com/huggingface/pytorch-transformers/blob/master/pytorch_transformers/modeling_xlnet.py#L606
-        Creates causal attention mask. Float mask where 1.0 indicates masked, 0.0 indicates not-masked.
-        
-                  same_length=False:      same_length=True:
-                  <mlen > <  qlen >       <mlen > <  qlen >
-               ^ [0 0 0 0 0 1 1 1 1]     [0 0 0 0 0 1 1 1 1]
-                 [0 0 0 0 0 0 1 1 1]     [1 0 0 0 0 0 1 1 1]
-            qlen [0 0 0 0 0 0 0 1 1]     [1 1 0 0 0 0 0 1 1]
-                 [0 0 0 0 0 0 0 0 1]     [1 1 1 0 0 0 0 0 1]
-               v [0 0 0 0 0 0 0 0 0]     [1 1 1 1 0 0 0 0 0]
-        """
-
-        attn_mask = torch.ones([qlen, qlen], dtype=dtype)
-        mask_u = torch.triu(attn_mask)  # Upper triangular part.
-        mask_dia = torch.tril(attn_mask) & torch.triu(attn_mask)  # Diagonal. Figure 2(c)
-
-        attn_mask_pad = torch.zeros([qlen, mlen], dtype=dtype)
-        ret = torch.cat([attn_mask_pad, mask_u - mask_dia], dim=1)  # [qlen, mlen]
-        if same_length:
-            # [[0,1,1],
-            #  [1,0,1],
-            #  [1,1,0]]
-            mask_l = torch.tril(attn_mask)  # Lower triangular part.
-            ret = torch.cat([ret[:, :qlen] + mask_l - mask_dia, ret[:, qlen:]], dim=1)
-
-        return ret.type(dtype=torch.float32)  # [qlen, qlen]
-
-    def positional_embedding(self, pos_seq, inv_freq):
-        sinusoid_inp = torch.einsum('i,d->id', pos_seq, inv_freq)
-        pos_emb = torch.cat([torch.sin(sinusoid_inp), torch.cos(sinusoid_inp)], dim=-1)
-        pos_emb = pos_emb[:, None, :]
-
-        return pos_emb
-
-    def _cache_mem(self, curr_out, prev_mem, mem_len, reuse_len=None):
-        """cache hidden states into memory."""
-
-        with torch.no_grad():
-            if mem_len is None or mem_len == 0:
-                return None
+from data_utils import get_lm_corpus
+from mem_transformer import MemTransformerLM
+from utils.exp_utils import create_exp_dir
+from utils.data_parallel import BalancedDataParallel
+
+parser = argparse.ArgumentParser(description='PyTorch Transformer Language Model')
+parser.add_argument('--data', type=str, default='./data/wikitext-103',
+                    help='location of the data corpus')
+parser.add_argument('--dataset', type=str, default='wt103',
+                    choices=['wt103', 'lm1b', 'enwik8', 'text8'],
+                    help='dataset name')
+parser.add_argument('--n_layer', type=int, default=12,
+                    help='number of total layers')
+parser.add_argument('--n_head', type=int, default=10,
+                    help='number of heads')
+parser.add_argument('--d_head', type=int, default=50,
+                    help='head dimension')
+parser.add_argument('--d_embed', type=int, default=-1,
+                    help='embedding dimension')
+parser.add_argument('--d_model', type=int, default=500,
+                    help='model dimension')
+parser.add_argument('--d_inner', type=int, default=1000,
+                    help='inner dimension in FF')
+parser.add_argument('--dropout', type=float, default=0.0,
+                    help='global dropout rate')
+parser.add_argument('--dropatt', type=float, default=0.0,
+                    help='attention probability dropout rate')
+parser.add_argument('--init', default='normal', type=str,
+                    help='parameter initializer to use.')
+parser.add_argument('--emb_init', default='normal', type=str,
+                    help='parameter initializer to use.')
+parser.add_argument('--init_range', type=float, default=0.1,
+                    help='parameters initialized by U(-init_range, init_range)')
+parser.add_argument('--emb_init_range', type=float, default=0.01,
+                    help='parameters initialized by U(-init_range, init_range)')
+parser.add_argument('--init_std', type=float, default=0.02,
+                    help='parameters initialized by N(0, init_std)')
+parser.add_argument('--proj_init_std', type=float, default=0.01,
+                    help='parameters initialized by N(0, init_std)')
+parser.add_argument('--optim', default='adam', type=str,
+                    choices=['adam', 'sgd', 'adagrad'],
+                    help='optimizer to use.')
+parser.add_argument('--lr', type=float, default=0.00025,
+                    help='initial learning rate (0.00025|5 for adam|sgd)')
+parser.add_argument('--mom', type=float, default=0.0,
+                    help='momentum for sgd')
+parser.add_argument('--scheduler', default='cosine', type=str,
+                    choices=['cosine', 'inv_sqrt', 'dev_perf', 'constant'],
+                    help='lr scheduler to use.')
+parser.add_argument('--warmup_step', type=int, default=0,
+                    help='upper epoch limit')
+parser.add_argument('--decay_rate', type=float, default=0.5,
+                    help='decay factor when ReduceLROnPlateau is used')
+parser.add_argument('--lr_min', type=float, default=0.0,
+                    help='minimum learning rate during annealing')
+parser.add_argument('--clip', type=float, default=0.25,
+                    help='gradient clipping')
+parser.add_argument('--clip_nonemb', action='store_true',
+                    help='only clip the gradient of non-embedding params')
+parser.add_argument('--max_step', type=int, default=100000,
+                    help='upper epoch limit')
+parser.add_argument('--batch_size', type=int, default=60,
+                    help='batch size')
+parser.add_argument('--batch_chunk', type=int, default=1,
+                    help='split batch into chunks to save memory')
+parser.add_argument('--tgt_len', type=int, default=70,
+                    help='number of tokens to predict')
+parser.add_argument('--eval_tgt_len', type=int, default=50,
+                    help='number of tokens to predict for evaluation')
+parser.add_argument('--ext_len', type=int, default=0,
+                    help='length of the extended context')
+parser.add_argument('--mem_len', type=int, default=0,
+                    help='length of the retained previous heads')
+parser.add_argument('--not_tied', action='store_true',
+                    help='do not tie the word embedding and softmax weights')
+parser.add_argument('--seed', type=int, default=1111,
+                    help='random seed')
+parser.add_argument('--cuda', action='store_true',
+                    help='use CUDA')
+parser.add_argument('--adaptive', action='store_true',
+                    help='use adaptive softmax')
+parser.add_argument('--div_val', type=int, default=1,
+                    help='divident value for adapative input and softmax')
+parser.add_argument('--pre_lnorm', action='store_true',
+                    help='apply LayerNorm to the input instead of the output')
+parser.add_argument('--varlen', action='store_true',
+                    help='use variable length')
+parser.add_argument('--multi_gpu', action='store_true',
+                    help='use multiple GPU')
+parser.add_argument('--log-interval', type=int, default=200,
+                    help='report interval')
+parser.add_argument('--eval-interval', type=int, default=4000,
+                    help='evaluation interval')
+parser.add_argument('--work_dir', default='LM-TFM', type=str,
+                    help='experiment directory.')
+parser.add_argument('--restart', action='store_true',
+                    help='restart training from the saved checkpoint')
+parser.add_argument('--restart_dir', type=str, default='',
+                    help='restart dir')
+parser.add_argument('--debug', action='store_true',
+                    help='run in debug mode (do not create exp dir)')
+parser.add_argument('--same_length', action='store_true',
+                    help='use the same attn length for all tokens')
+parser.add_argument('--attn_type', type=int, default=0,
+                    help='attention type. 0 for ours, 1 for Shaw et al,'
+                    '2 for Vaswani et al, 3 for Al Rfou et al.')
+parser.add_argument('--clamp_len', type=int, default=-1,
+                    help='use the same pos embeddings after clamp_len')
+parser.add_argument('--eta_min', type=float, default=0.0,
+                    help='min learning rate for cosine scheduler')
+parser.add_argument('--gpu0_bsz', type=int, default=-1,
+                    help='batch size on gpu 0')
+parser.add_argument('--max_eval_steps', type=int, default=-1,
+                    help='max eval steps')
+parser.add_argument('--sample_softmax', type=int, default=-1,
+                    help='number of samples in sampled softmax')
+parser.add_argument('--patience', type=int, default=0,
+                    help='patience')
+parser.add_argument('--finetune_v2', action='store_true',
+                    help='finetune v2')
+parser.add_argument('--finetune_v3', action='store_true',
+                    help='finetune v3')
+parser.add_argument('--static-loss-scale', type=float, default=1,
+                    help='Static loss scale, positive power of 2 values can '
+                    'improve fp16 convergence.')
+parser.add_argument('--dynamic-loss-scale', action='store_true',
+                    help='Use dynamic loss scaling.  If supplied, this argument'
+                    ' supersedes --static-loss-scale.')
+args = parser.parse_args()
+args.tied = not args.not_tied
+
+if args.d_embed < 0:
+    args.d_embed = args.d_model
+
+assert args.ext_len >= 0, 'extended context length must be non-negative'
+assert args.batch_size % args.batch_chunk == 0
+
+args.work_dir = '{}-{}'.format(args.work_dir, args.dataset)
+args.work_dir = os.path.join(args.work_dir, time.strftime('%Y%m%d-%H%M%S'))
+logging = create_exp_dir(args.work_dir,
+    scripts_to_save=['train.py', 'mem_transformer.py'], debug=args.debug)
+
+# Set the random seed manually for reproducibility.
+np.random.seed(args.seed)
+torch.manual_seed(args.seed)
+if torch.cuda.is_available():
+    if not args.cuda:
+        print('WARNING: You have a CUDA device, so you should probably run with --cuda')
+    else:
+        torch.cuda.manual_seed_all(args.seed)
+
+
+device = torch.device('cuda' if args.cuda else 'cpu')
+
+###############################################################################
+# Load data
+###############################################################################
+corpus = get_lm_corpus(args.data, args.dataset)
+ntokens = len(corpus.vocab)
+args.n_token = ntokens
+
+eval_batch_size = 10
+tr_iter = corpus.get_iterator('train', args.batch_size, args.tgt_len,
+    device=device, ext_len=args.ext_len)
+va_iter = corpus.get_iterator('valid', eval_batch_size, args.eval_tgt_len,
+    device=device, ext_len=args.ext_len)
+te_iter = corpus.get_iterator('test', eval_batch_size, args.eval_tgt_len,
+    device=device, ext_len=args.ext_len)
+
+# adaptive softmax / embedding
+cutoffs, tie_projs = [], [False]
+if args.adaptive:
+    assert args.dataset in ['wt103', 'lm1b']
+    if args.dataset == 'wt103':
+        cutoffs = [20000, 40000, 200000]
+        tie_projs += [True] * len(cutoffs)
+    elif args.dataset == 'lm1b':
+        cutoffs = [60000, 100000, 640000]
+        tie_projs += [False] * len(cutoffs)
+
+###############################################################################
+# Build the model
+###############################################################################
+def init_weight(weight):
+    if args.init == 'uniform':
+        nn.init.uniform_(weight, -args.init_range, args.init_range)
+    elif args.init == 'normal':
+        nn.init.normal_(weight, 0.0, args.init_std)
+
+def init_bias(bias):
+    nn.init.constant_(bias, 0.0)
+
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Linear') != -1:
+        if hasattr(m, 'weight') and m.weight is not None:
+            init_weight(m.weight)
+        if hasattr(m, 'bias') and m.bias is not None:
+            init_bias(m.bias)
+    elif classname.find('AdaptiveEmbedding') != -1:
+        if hasattr(m, 'emb_projs'):
+            for i in range(len(m.emb_projs)):
+                if m.emb_projs[i] is not None:
+                    nn.init.normal_(m.emb_projs[i], 0.0, args.proj_init_std)
+    elif classname.find('Embedding') != -1:
+        if hasattr(m, 'weight'):
+            init_weight(m.weight)
+    elif classname.find('ProjectedAdaptiveLogSoftmax') != -1:
+        if hasattr(m, 'cluster_weight') and m.cluster_weight is not None:
+            init_weight(m.cluster_weight)
+        if hasattr(m, 'cluster_bias') and m.cluster_bias is not None:
+            init_bias(m.cluster_bias)
+        if hasattr(m, 'out_projs'):
+            for i in range(len(m.out_projs)):
+                if m.out_projs[i] is not None:
+                    nn.init.normal_(m.out_projs[i], 0.0, args.proj_init_std)
+    elif classname.find('LayerNorm') != -1:
+        if hasattr(m, 'weight'):
+            nn.init.normal_(m.weight, 1.0, args.init_std)
+        if hasattr(m, 'bias') and m.bias is not None:
+            init_bias(m.bias)
+    elif classname.find('TransformerLM') != -1:
+        if hasattr(m, 'r_emb'):
+            init_weight(m.r_emb)
+        if hasattr(m, 'r_w_bias'):
+            init_weight(m.r_w_bias)
+        if hasattr(m, 'r_r_bias'):
+            init_weight(m.r_r_bias)
+        if hasattr(m, 'r_bias'):
+            init_bias(m.r_bias)
+
+def update_dropout(m):
+    classname = m.__class__.__name__
+    if classname.find('Dropout') != -1:
+        if hasattr(m, 'p'):
+            m.p = args.dropout
+
+def update_dropatt(m):
+    if hasattr(m, 'dropatt'):
+        m.dropatt.p = args.dropatt
+
+if args.restart:
+    with open(os.path.join(args.restart_dir, 'model.pt'), 'rb') as f:
+        model = torch.load(f)
+        model = model.float()
+    model.apply(update_dropout)
+    model.apply(update_dropatt)
+else:
+    model = MemTransformerLM(ntokens, args.n_layer, args.n_head, args.d_model,
+        args.d_head, args.d_inner, args.dropout, args.dropatt,
+        tie_weight=args.tied, d_embed=args.d_embed, div_val=args.div_val,
+        tie_projs=tie_projs, pre_lnorm=args.pre_lnorm, tgt_len=args.tgt_len,
+        ext_len=args.ext_len, mem_len=args.mem_len, cutoffs=cutoffs,
+        same_length=args.same_length, attn_type=args.attn_type,
+        clamp_len=args.clamp_len, sample_softmax=args.sample_softmax)
+    model.apply(weights_init)
+    model.word_emb.apply(weights_init) # ensure embedding init is not overridden by out_layer in case of weight sharing
+args.n_all_param = sum([p.nelement() for p in model.parameters()])
+args.n_nonemb_param = sum([p.nelement() for p in model.layers.parameters()])
+
+
+if args.multi_gpu:
+    model = model.to(device)
+    if args.gpu0_bsz >= 0:
+        para_model = BalancedDataParallel(args.gpu0_bsz // args.batch_chunk,
+                                          model, dim=1).to(device)
+    else:
+        para_model = nn.DataParallel(model, dim=1).to(device)
+else:
+    para_model = model.to(device)
+
+#### optimizer
+if args.optim.lower() == 'sgd':
+    if args.sample_softmax > 0:
+        dense_params, sparse_params = [], []
+        for param in model.parameters():
+            if param.size() == model.word_emb.weight.size():
+                sparse_params.append(param)
             else:
-                if reuse_len is not None and reuse_len > 0:
-                    curr_out = curr_out[:reuse_len]
-
-                if prev_mem is None:
-                    new_mem = curr_out[-mem_len:]
-                else:
-                    new_mem = torch.cat([prev_mem, curr_out], dim=0)[-mem_len:]
-
-            return new_mem
-
-    def relative_positional_encoding(self, qlen, klen, d_model, clamp_len, attn_type,
-                                     bi_data, bsz=None, dtype=None):
-        """create relative positional encoding."""
-
-        freq_seq = torch.arange(0, d_model, 2.0)
-        if dtype is not None and dtype != torch.float32:
-            freq_seq = freq_seq.type(dtype)
-        inv_freq = 1 / (10000 ** (freq_seq / d_model))
-
-        assert attn_type == 'bi'  # always set to XLNet
-        beg, end = klen, -qlen
-
-
-        if bi_data:
-            fwd_pos_seq = torch.arange(beg, end, -1.0)
-            bwd_pos_seq = torch.arange(-beg, -end, 1.0)
-
-            if dtype is not None and dtype != torch.float32:
-                fwd_pos_seq = fwd_pos_seq.type(dtype=dtype)
-                bwd_pos_seq = bwd_pos_seq.type(dtype=dtype)
-
-            if clamp_len > 0:
-                fwd_pos_seq = torch.clamp(fwd_pos_seq, -clamp_len, clamp_len)
-                bwd_pos_seq = torch.clamp(bwd_pos_seq, -clamp_len, clamp_len)
-
-            fwd_pos_emb = self.positional_embedding(fwd_pos_seq, inv_freq)
-            bwd_pos_emb = self.positional_embedding(bwd_pos_seq, inv_freq)
-
-            pos_emb = torch.cat([fwd_pos_emb, bwd_pos_emb], dim=1)
-        else:
-            fwd_pos_seq = torch.arange(beg, end, -1.0)
-            if dtype is not None and dtype != torch.float32:
-                fwd_pos_seq = fwd_pos_seq.type(dtype=dtype)
-            if clamp_len > 0:
-                fwd_pos_seq = torch.clamp(fwd_pos_seq, -clamp_len, clamp_len)
-            pos_emb = self.positional_embedding(fwd_pos_seq, inv_freq)
-
-        return pos_emb
-
-    def forward(self, inp_k, seg_id, input_mask, mems, perm_mask, target_mapping, inp_q):
-        new_mems = []
-
-        bsz = inp_k.shape[1]
-        qlen = inp_k.shape[0]
-        mlen = mems[0].size(0) if mems is not None else 0
-        klen = mlen + qlen
-
-        ##### Attention mask
-        # causal attention mask
-        assert self.attn_type == 'bi'
-        attn_mask = None
-
-        # data mask: input mask & perm mask
-        if input_mask is not None and perm_mask is not None:
-            data_mask = input_mask[None] + perm_mask
-        elif input_mask is not None and perm_mask is None:
-            data_mask = input_mask[None]
-        elif input_mask is None and perm_mask is not None:
-            data_mask = perm_mask
-        else:
-            data_mask = None
-
-        if data_mask is not None:
-            # all mems can be attended to
-            mems_mask = torch.zeros([data_mask.shape[0], mlen, bsz],
-                                    dtype=torch.float32)
-            data_mask = torch.cat([mems_mask, data_mask], dim=1)
-            if attn_mask is None:
-                attn_mask = data_mask[:, :, :, None]
+                dense_params.append(param)
+        optimizer_sparse = optim.SGD(sparse_params, lr=args.lr * 2)
+        optimizer = optim.SGD(dense_params, lr=args.lr, momentum=args.mom)
+    else:
+        optimizer = optim.SGD(model.parameters(), lr=args.lr,
+            momentum=args.mom)
+elif args.optim.lower() == 'adam':
+    if args.sample_softmax > 0:
+        dense_params, sparse_params = [], []
+        for param in model.parameters():
+            if param.size() == model.word_emb.weight.size():
+                sparse_params.append(param)
             else:
-                attn_mask += data_mask[:, :, :, None]
+                dense_params.append(param)
+        optimizer_sparse = optim.SparseAdam(sparse_params, lr=args.lr)
+        optimizer = optim.Adam(dense_params, lr=args.lr)
+    else:
+        optimizer = optim.Adam(model.parameters(), lr=args.lr)
+elif args.optim.lower() == 'adagrad':
+    optimizer = optim.Adagrad(model.parameters(), lr=args.lr)
 
-        if attn_mask is not None:
-            attn_mask = attn_mask.gt(0).type(torch.float32)
-
-        if attn_mask is not None:
-            non_tgt_mask = -torch.eye(qlen, dtype=torch.float32)  # [qlen, qlen]
-            non_tgt_mask = torch.cat([torch.zeros([qlen, mlen], dtype=torch.float32),  # [qlen, klen]
-                                      non_tgt_mask],
-                                     dim=-1)
-            # attention mask is cancelled by non_tgt_mask (?)
-            non_tgt_mask = (attn_mask +
-                            non_tgt_mask[:, :, None, None]).gt(0).type(dtype=torch.float32)
+#### scheduler
+if args.scheduler == 'cosine':
+    # here we do not set eta_min to lr_min to be backward compatible
+    # because in previous versions eta_min is default to 0
+    # rather than the default value of lr_min 1e-6
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer,
+        args.max_step, eta_min=args.eta_min) # should use eta_min arg
+    if args.sample_softmax > 0:
+        scheduler_sparse = optim.lr_scheduler.CosineAnnealingLR(optimizer_sparse,
+            args.max_step, eta_min=args.eta_min) # should use eta_min arg
+elif args.scheduler == 'inv_sqrt':
+    # originally used for Transformer (in Attention is all you need)
+    def lr_lambda(step):
+        # return a multiplier instead of a learning rate
+        if step == 0 and args.warmup_step == 0:
+            return 1.
         else:
-            non_tgt_mask = None
+            return 1. / (step ** 0.5) if step > args.warmup_step \
+                   else step / (args.warmup_step ** 1.5)
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+elif args.scheduler == 'dev_perf':
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer,
+        factor=args.decay_rate, patience=args.patience, min_lr=args.lr_min)
+    if args.sample_softmax > 0:
+        scheduler_sparse = optim.lr_scheduler.ReduceLROnPlateau(optimizer_sparse,
+            factor=args.decay_rate, patience=args.patience, min_lr=args.lr_min)
+elif args.scheduler == 'constant':
+    pass
 
-        ##### Word embedding
-        lookup_table = self.embedding
-        word_emb_k = lookup_table(inp_k)
 
-        if inp_q is not None:
-            if target_mapping is not None:
-                word_emb_q = self.mask_emb.repeat(target_mapping.shape[0], bsz, 1)
-            else:
-                inp_q_ext = inp_q[:, :, None]
-                word_emb_q = inp_q_ext * self.mask_emb + (1 - inp_q_ext) * word_emb_k
+if args.restart:
+    if os.path.exists(os.path.join(args.restart_dir, 'optimizer.pt')):
+        with open(os.path.join(args.restart_dir, 'optimizer.pt'), 'rb') as f:
+            opt_state_dict = torch.load(f)
+            optimizer.load_state_dict(opt_state_dict)
+    else:
+        print('Optimizer was not saved. Start from scratch.')
 
-        #### Figure 2(a), Content Stream(Original Attention), h^(0)_t = e(x_i) = e(inp_k)
-        output_h = self.Dropout(word_emb_k)
-        if inp_q is not None:
-            #### Query Stream, g^(0)_t = w
-            #### the first layer query stream is initialized with a trainable vector
-            output_g = self.Dropout(word_emb_q)
+logging('=' * 100)
+for k, v in args.__dict__.items():
+    logging('    - {} : {}'.format(k, v))
+logging('=' * 100)
+logging('#params = {}'.format(args.n_all_param))
+logging('#non emb params = {}'.format(args.n_nonemb_param))
 
-        ##### Segment embedding
-        # paper
-        # Given a pair of positions i and j in the sequence, if
-        # i and j are from the same segment
-        if seg_id is not None:
-            # Convert `seg_id` to one-hot `seg_mat`
-            mem_pad = torch.zeros([mlen, bsz], dtype=torch.int32)
-            cat_ids = torch.cat([mem_pad, seg_id], dim=0)
+###############################################################################
+# Training code
+###############################################################################
 
-            # `1` indicates not in the same segment [qlen x klen x bsz]
-            seg_mat = (~torch.eq(seg_id[:, None], cat_ids[None, :])).type(torch.long)
-            seg_mat = torch.eye(2, dtype=torch.float32)[seg_mat]
+def evaluate(eval_iter):
+    # Turn on evaluation mode which disables dropout.
+    model.eval()
+
+    # If the model does not use memory at all, make the ext_len longer.
+    # Otherwise, make the mem_len longer and keep the ext_len the same.
+    if args.mem_len == 0:
+        model.reset_length(args.eval_tgt_len,
+            args.ext_len+args.tgt_len-args.eval_tgt_len, args.mem_len)
+    else:
+        model.reset_length(args.eval_tgt_len,
+            args.ext_len, args.mem_len+args.tgt_len-args.eval_tgt_len)
+
+    # Evaluation
+    total_len, total_loss = 0, 0.
+    with torch.no_grad():
+        mems = tuple()
+        for i, (data, target, seq_len) in enumerate(eval_iter):
+            if args.max_eval_steps > 0 and i >= args.max_eval_steps:
+                break
+            ret = model(data, target, *mems)
+            loss, mems = ret[0], ret[1:]
+            loss = loss.mean()
+            total_loss += seq_len * loss.float().item()
+            total_len += seq_len
+
+    # Switch back to the training mode
+    model.reset_length(args.tgt_len, args.ext_len, args.mem_len)
+    model.train()
+
+    return total_loss / total_len
+
+
+def train():
+    # Turn on training mode which enables dropout.
+    global train_step, train_loss, best_val_loss, eval_start_time, log_start_time
+    model.train()
+    if args.batch_chunk > 1:
+        mems = [tuple() for _ in range(args.batch_chunk)]
+    else:
+        mems = tuple()
+    train_iter = tr_iter.get_varlen_iter() if args.varlen else tr_iter
+    for batch, (data, target, seq_len) in enumerate(train_iter):
+        model.zero_grad()
+        if args.batch_chunk > 1:
+            data_chunks = torch.chunk(data, args.batch_chunk, 1)
+            target_chunks = torch.chunk(target, args.batch_chunk, 1)
+            for i in range(args.batch_chunk):
+                data_i = data_chunks[i].contiguous()
+                target_i = target_chunks[i].contiguous()
+                ret = para_model(data_i, target_i, *mems[i])
+                loss, mems[i] = ret[0], ret[1:]
+                loss = loss.float().mean().type_as(loss) / args.batch_chunk
+                loss.backward()
+                train_loss += loss.float().item()
         else:
-            seg_mat = None
+            ret = para_model(data, target, *mems)
+            loss, mems = ret[0], ret[1:]
+            loss = loss.float().mean().type_as(loss)
+            loss.backward()
+            train_loss += loss.float().item()
 
-        ##### Positional encoding
-        pos_emb = self.relative_positional_encoding(
-            qlen, klen, self.d_model, self.clamp_len, self.attn_type, self.bi_data,
-            bsz=bsz, dtype=torch.float32)
-        pos_emb = self.Dropout(pos_emb)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
 
-        ##### Attention layers
-        if mems is None:
-            mems = [None] * self.n_layer
+        optimizer.step()
+        if args.sample_softmax > 0:
+            optimizer_sparse.step()
 
-        for i in range(self.n_layer):
-            # cache new mems
-            new_mems.append(self._cache_mem(output_h, mems[i], self.mem_len, self.reuse_len))
-
-            # segment bias
-            if seg_id is None:
-                r_s_bias_i = None
-                seg_embed_i = None
+        # step-wise learning rate annealing
+        train_step += 1
+        if args.scheduler in ['cosine', 'constant', 'dev_perf']:
+            # linear warmup stage
+            if train_step < args.warmup_step:
+                curr_lr = args.lr * train_step / args.warmup_step
+                optimizer.param_groups[0]['lr'] = curr_lr
+                if args.sample_softmax > 0:
+                    optimizer_sparse.param_groups[0]['lr'] = curr_lr * 2
             else:
-                r_s_bias_i = self.r_s_bias[i]
-                seg_embed_i = self.seg_embed[i]
+                if args.scheduler == 'cosine':
+                    scheduler.step(train_step)
+                    if args.sample_softmax > 0:
+                        scheduler_sparse.step(train_step)
+        elif args.scheduler == 'inv_sqrt':
+            scheduler.step(train_step)
 
-            if inp_q is not None:
-                output_h, output_g = self.two_stream_rel_attn(
-                    h=output_h,
-                    g=output_g,
-                    r=pos_emb,
-                    r_w_bias=self.r_w_bias[i],
-                    r_r_bias=self.r_r_bias[i],
-                    seg_mat=seg_mat,
-                    r_s_bias=r_s_bias_i,
-                    seg_embed=seg_embed_i,
-                    attn_mask_h=non_tgt_mask,
-                    attn_mask_g=attn_mask,
-                    mems=mems[i],
-                    target_mapping=target_mapping)
+        if train_step % args.log_interval == 0:
+            cur_loss = train_loss / args.log_interval
+            elapsed = time.time() - log_start_time
+            log_str = '| epoch {:3d} step {:>8d} | {:>6d} batches | lr {:.3g} ' \
+                      '| ms/batch {:5.2f} | loss {:5.2f}'.format(
+                epoch, train_step, batch+1, optimizer.param_groups[0]['lr'],
+                elapsed * 1000 / args.log_interval, cur_loss)
+            if args.dataset in ['enwik8', 'text8']:
+                log_str += ' | bpc {:9.5f}'.format(cur_loss / math.log(2))
             else:
-                output_h = self.rel_multihead_attn(
-                    h=output_h,
-                    r=pos_emb,
-                    r_w_bias=self.r_w_bias[i],
-                    r_r_bias=self.r_r_bias[i],
-                    seg_mat=seg_mat,
-                    r_s_bias=r_s_bias_i,
-                    seg_embed=seg_embed_i,
-                    attn_mask=non_tgt_mask,
-                    mems=mems[i])
+                log_str += ' | ppl {:9.3f}'.format(math.exp(cur_loss))
+            logging(log_str)
+            train_loss = 0
+            log_start_time = time.time()
 
-            if inp_q is not None:
-                output_g = self.positionwise_ffn(inp=output_g)
+        if train_step % args.eval_interval == 0:
+            val_loss = evaluate(va_iter)
+            logging('-' * 100)
+            log_str = '| Eval {:3d} at step {:>8d} | time: {:5.2f}s ' \
+                      '| valid loss {:5.2f}'.format(
+                train_step // args.eval_interval, train_step,
+                (time.time() - eval_start_time), val_loss)
+            if args.dataset in ['enwik8', 'text8']:
+                log_str += ' | bpc {:9.5f}'.format(val_loss / math.log(2))
+            else:
+                log_str += ' | valid ppl {:9.3f}'.format(math.exp(val_loss))
+            logging(log_str)
+            logging('-' * 100)
+            # Save the model if the validation loss is the best we've seen so far.
+            if not best_val_loss or val_loss < best_val_loss:
+                if not args.debug:
+                    with open(os.path.join(args.work_dir, 'model.pt'), 'wb') as f:
+                        torch.save(model, f)
+                    with open(os.path.join(args.work_dir, 'optimizer.pt'), 'wb') as f:
+                        torch.save(optimizer.state_dict(), f)
+                best_val_loss = val_loss
 
-            output_h = self.positionwise_ffn(inp=output_h)
+            # dev-performance based learning rate annealing
+            if args.scheduler == 'dev_perf':
+                scheduler.step(val_loss)
+                if args.sample_softmax > 0:
+                    scheduler_sparse.step(val_loss)
 
-        if inp_q is not None:
-            output = self.Dropout(output_g)
-        else:
-            output = self.Dropout(output_h)
+            eval_start_time = time.time()
 
-        logits = torch.einsum('ibd,nd->ibn', output, lookup_table.weight) + self.softmax_b
+        if train_step == args.max_step:
+            break
 
-        return logits, new_mems
+# Loop over epochs.
+train_step = 0
+train_loss = 0
+best_val_loss = None
 
+log_start_time = time.time()
+eval_start_time = time.time()
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--data', type=str, default='data/shakespeare/hamlet.txt')
-    parser.add_argument('--tokenizer', type=str, default='bert-base-uncased',
-                        help='Path to the sentence piece model from pytorch-pretrained-BERT')
-    parser.add_argument('--seq_len', type=int, default=512, help="Sequence length.")
-    parser.add_argument('--reuse_len', type=int, default=256,
-                        help="Number of token that can be reused as memory. "
-                             "Could be half of `seq_len`.")
-    parser.add_argument('--perm_size', type=int,
-                        default=256,
-                        help="the length of longest permutation. Could be set to be reuse_len.")
-    parser.add_argument('--bi_data', type=bool, default=False,
-                        help="whether to create bidirectional data")
-    parser.add_argument('--mask_alpha', type=int,
-                        default=6, help="How many tokens to form a group.")
-    parser.add_argument('--mask_beta', type=int,
-                        default=1, help="How many tokens to mask within each group.")
-    parser.add_argument('--num_predict', type=int,
-                        default=85, help="Num of tokens to predict.")
-    parser.add_argument('--mem_len', type=int,
-                        default=384, help="Number of steps to cache")
-    parser.add_argument('--num_epoch', type=int,
-                        default=100, help="Number of epochs")
+# At any point you can hit Ctrl + C to break out of training early.
+try:
+    for epoch in itertools.count(start=1):
+        train()
+        if train_step == args.max_step:
+            logging('-' * 100)
+            logging('End of training')
+            break
+except KeyboardInterrupt:
+    logging('-' * 100)
+    logging('Exiting from training early')
 
-    args = parser.parse_args()
+# Load the best saved model.
+with open(os.path.join(args.work_dir, 'model.pt'), 'rb') as f:
+    model = torch.load(f)
+para_model = model.to(device)
 
-    sp = BertTokenizer.from_pretrained(args.tokenizer)
-    model = XLNet(n_token=len(sp.vocab), n_layer=6, n_head=4, d_head=8,
-                  d_inner=32, d_model=32,
-                  dropout=0.1, dropatt=0.1,
-                  attn_type="bi", bi_data=args.bi_data,
-                  clamp_len=-1, same_length=False,
-                  reuse_len=args.reuse_len, mem_len=args.mem_len)
-
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.01)
-
-    for num_epoch in range(args.num_epoch):
-        mems = None
-
-        '''
-        feature: 
-            input: int32 array
-            is_masked: bool array
-            target: int32 array, one word shift away from input
-            seg_id: 0...1...
-            label: 0
-        '''
-        features = data_utils._create_data(sp=sp,
-                                           input_paths=args.data,
-                                           seq_len=args.seq_len,
-                                           reuse_len=args.reuse_len,
-                                           bi_data=args.bi_data,
-                                           num_predict=args.num_predict,
-                                           mask_alpha=args.mask_alpha,
-                                           mask_beta=args.mask_beta)
-
-
-        num_step = 0
-        for feature in features:
-
-            '''
-            Various mask types:
-                        
-                # Set the permutation indices of non-masked (& non-functional) tokens to the
-                # smallest index (-1):
-                # (1) they can be seen by all other positions
-                # (2) they cannot see masked positions, so there won't be information leak
-            
-                # Create `target_mask`: non-functional and masked tokens
-                # 1: use mask as input and have loss
-                # 0: use token (or [SEP], [CLS]) as input and do not have loss
-            
-                # Create `perm_mask`
-                # `target_tokens` cannot see themselves
-                # put `rev_index` if real mask(not cls or sep) else `rev_index + 1`
-                self_rev_index = torch.where(target_tokens, rev_index, rev_index + 1)
-            
-                # 1: cannot attend if i <= j and j is not non-masked (masked_or_func_tokens)
-                # 0: can attend if i > j or j is non-masked
-                perm_mask = (self_rev_index[:, None] <= rev_index[None, :]) & masked_or_func_tokens.bool()
-                perm_mask = perm_mask.type(torch.float32)
-            
-                # new target: [next token] for LM and [curr token] (self) for PLM
-                new_targets = torch.cat([inputs[0: 1], targets[: -1]], dim=0)
-            
-                # construct inputs_k
-                inputs_k = inputs
-            
-                # construct inputs_q
-                inputs_q = target_mask
-            
-                return perm_mask, new_targets, target_mask, inputs_k, inputs_q
-            '''
-
-            permutation = data_utils.make_permute(feature,
-                                                  reuse_len=args.reuse_len,
-                                                  seq_len=args.seq_len,
-                                                  perm_size=args.perm_size,
-                                                  num_predict=args.num_predict)
-
-            # batch size is 1
-            inp_k = permutation['input_k'].unsqueeze(-1)  # [seq_len, 1(=bsz)]
-            seg_id = permutation['seg_id'].unsqueeze(-1)  # [seq_len, 1(=bsz)]
-            target = permutation['target'].unsqueeze(-1)  # [num_predict, 1(=bsz)]
-            perm_mask = permutation['perm_mask'].unsqueeze(-1)  # [seq_len, seq_len, 1(=bsz)]
-            target_mapping = \
-                permutation['target_mapping'].unsqueeze(-1)  # [num_predict, seq_len, 1(=bsz)]
-            inp_q = permutation['input_q'].unsqueeze(-1)  # [seq_len, 1(=bsz)]
-            tgt_mask = permutation['target_mask'].unsqueeze(-1)  # [num_predict, 1(=bsz)]
-
-            # logits size [seq_len, 1, voc_size]
-            logits, new_mems = model(inp_k=inp_k, seg_id=seg_id, input_mask=None,
-                                     mems=mems, perm_mask=perm_mask,
-                                     target_mapping=target_mapping, inp_q=inp_q)
-
-            #print(logits.size())
-
-            # crossentropy loss accumulated on targeted predictions
-            lm_loss = criterion(logits.transpose(1, 2), target).type(torch.float32)
-            tgt_mask_sum = tgt_mask.reshape(-1).sum()
-            lm_loss_sum = (lm_loss * tgt_mask).reshape(-1).sum()
-
-            optimizer.zero_grad()
-            total_loss = lm_loss_sum / tgt_mask_sum
-            print('Number of Epoch: %04d in %04d Step' % ((num_epoch + 1), (num_step + 1)),
-                  'cost =', '{:.6f}'.format(total_loss))
-            num_step += 1
-
-            total_loss.backward()
-            optimizer.step()
-
-            mems = new_mems
+# Run on test data.
+test_loss = evaluate(te_iter)
+logging('=' * 100)
+if args.dataset in ['enwik8', 'text8']:
+    logging('| End of training | test loss {:5.2f} | test bpc {:9.5f}'.format(
+        test_loss, test_loss / math.log(2)))
+else:
+    logging('| End of training | test loss {:5.2f} | test ppl {:9.3f}'.format(
+        test_loss, math.exp(test_loss)))
+logging('=' * 100)
