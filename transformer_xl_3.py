@@ -12,26 +12,26 @@ bash getdata.sh
 step 1: train the network
 
 
-python train.py  --data ./data/wikitext-103/ \
+python transformer_xl_3.py  --data ./data/wikitext-103/ \
         --work_dir output/xlnet3 \
         --dataset wt103 \
-        --n_layer 12 \
-        --d_model 512 \
+        --n_layer 8 \
+        --d_model 64 \
         --n_head 8 \
-        --d_head 64 \
-        --d_inner 2048 \
+        --d_head 8 \
+        --d_inner 128 \
         --dropout 0.1 \
         --dropatt 0.0 \
         --optim adam \
         --lr 0.00025 \
         --warmup_step 0 \
-        --max_step 400000 \
-        --tgt_len 512 \
-        --mem_len 512 \
+        --max_step 4000 \
+        --tgt_len 128 \
+        --mem_len 128 \
         --eval_tgt_len 128 \
-        --batch_size 22 \
+        --batch_size 16 \
         --multi_gpu \
-        --gpu0_bsz 4 \
+        --gpu0_bsz 4
 
 
     python eval.py \
@@ -61,8 +61,7 @@ import torch.optim as optim
 from utils.weight_init import weights_init
 from utils.save_utils import *
 from utils.data_iters import *
-
-# from mem_transformer import MemTransformerLM
+from utils.mem_transformer import MemTransformerLM
 
 parser = argparse.ArgumentParser(description='PyTorch Transformer Language Model')
 
@@ -92,14 +91,14 @@ if 1 == 1:
                         help='parameter initializer to use.')
     parser.add_argument('--emb_init', default='normal', type=str,
                         help='parameter initializer to use.')
-    parser.add_argument('--init_range', type=float, default=0.1,
-                        help='parameters initialized by U(-init_range, init_range)')
-    parser.add_argument('--emb_init_range', type=float, default=0.01,
-                        help='parameters initialized by U(-init_range, init_range)')
-    parser.add_argument('--init_std', type=float, default=0.02,
-                        help='parameters initialized by N(0, init_std)')
-    parser.add_argument('--proj_init_std', type=float, default=0.01,
-                        help='parameters initialized by N(0, init_std)')
+    # parser.add_argument('--init_range', type=float, default=0.1,
+    #                     help='parameters initialized by U(-init_range, init_range)')
+    # parser.add_argument('--emb_init_range', type=float, default=0.01,
+    #                     help='parameters initialized by U(-init_range, init_range)')
+    # parser.add_argument('--init_std', type=float, default=0.02,
+    #                     help='parameters initialized by N(0, init_std)')
+    # parser.add_argument('--proj_init_std', type=float, default=0.01,
+    #                     help='parameters initialized by N(0, init_std)')
     parser.add_argument('--optim', default='adam', type=str,
                         choices=['adam', 'sgd', 'adagrad'],
                         help='optimizer to use.')
@@ -333,9 +332,6 @@ logging('=' * 100)
 logging('#params = {}'.format(args.n_all_param))
 logging('#non emb params = {}'.format(args.n_nonemb_param))
 
-
-
-exit()
 
 ###############################################################################
 # Training code

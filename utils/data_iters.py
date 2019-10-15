@@ -37,11 +37,12 @@ class Vocab(object):
             return symbols
 
     def count_file(self, path, verbose=False, add_eos=False):
-        if verbose: print('counting file {} ...'.format(path))
+        if verbose:
+            print('counting file {} ...'.format(path))
         assert os.path.exists(path)
 
         sents = []
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, 'r') as f:
             for idx, line in enumerate(f):
                 if verbose and idx > 0 and idx % 500000 == 0:
                     print('    line {}'.format(idx))
@@ -65,7 +66,7 @@ class Vocab(object):
         self.idx2sym = []
         self.sym2idx = OrderedDict()
 
-        with open(vocab_file, 'r', encoding='utf-8') as f:
+        with open(vocab_file, 'r') as f:
             for line in f:
                 symb = line.strip().split()[0]
                 self.add_symbol(symb)
@@ -97,7 +98,7 @@ class Vocab(object):
         if verbose: print('encoding file {} ...'.format(path))
         assert os.path.exists(path)
         encoded = []
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, 'r') as f:
             for idx, line in enumerate(f):
                 if verbose and idx > 0 and idx % 500000 == 0:
                     print('    line {}'.format(idx))
@@ -417,18 +418,3 @@ def get_lm_corpus(datadir, dataset):
         torch.save(corpus, fn)
 
     return corpus
-
-
-if __name__ == '__main__':
-    import argparse
-
-    parser = argparse.ArgumentParser(description='unit test')
-    parser.add_argument('--datadir', type=str, default='../data/text8',
-                        help='location of the data corpus')
-    parser.add_argument('--dataset', type=str, default='text8',
-                        choices=['ptb', 'wt2', 'wt103', 'lm1b', 'enwik8', 'text8'],
-                        help='dataset name')
-    args = parser.parse_args()
-
-    corpus = get_lm_corpus(args.datadir, args.dataset)
-    print('Vocab size : {}'.format(len(corpus.vocab.idx2sym)))
