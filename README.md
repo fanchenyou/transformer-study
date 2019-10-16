@@ -8,7 +8,7 @@
     * 2. simple toy example showing the idea of Transformer-XL which uses additional memory to encode history    
     * 2.1 Build Transformer-XL + MultiAttention heads
 
-#### 3. transformer_xl full release, [src](https://github.com/kimiyoung/transformer-xl/tree/master/pytorch)
+#### 3. transformer_xl full release, [src](https://github.com/kimiyoung/transformer-xl/tree/master/pytorch), [tutorial](https://towardsdatascience.com/transformer-xl-explained-combining-transformers-and-rnns-into-a-state-of-the-art-language-model-c0cfe9e5a924)
     * TODO: Full release of Transformer-XL
     
 #### 4. xlnet, [paper](https://arxiv.org/pdf/1906.08237.pdf), [src](https://github.com/graykode/xlnet-Pytorch), [tutorial](https://towardsdatascience.com/what-is-xlnet-and-why-it-outperforms-bert-8d8fce710335)
