@@ -8,6 +8,8 @@
     * 2. simple toy example showing the idea of Transformer-XL which uses additional memory to encode history    
     * 2.1 Build Transformer-XL + MultiAttention heads
     * Show how to use previous hidden states to achieve "Recurrence Mechanism"
+      - the output of the previous hidden layer of that segment
+      - the output of the previous hidden layer from the previous segment
     * Show how to use relative positional encoding to incorporate position information
 
 #### 3. transformer_xl full release, [src](https://github.com/kimiyoung/transformer-xl/tree/master/pytorch), [tutorial](https://towardsdatascience.com/transformer-xl-explained-combining-transformers-and-rnns-into-a-state-of-the-art-language-model-c0cfe9e5a924)
