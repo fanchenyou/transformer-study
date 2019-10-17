@@ -11,89 +11,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 '''
-https://arxiv.org/pdf/1809.10853.pdf
+Adaptive Softmax is used in transformer-XL
+https://arxiv.org/pdf/1609.04309.pdf
 '''
-class AdaptiveLogSoftmax(nn.Module):
-    def __init__(self, in_features, n_classes, cutoffs, keep_order=False):
-        super(AdaptiveLogSoftmax, self).__init__()
-
-        cutoffs = list(cutoffs)
-
-        if (cutoffs != sorted(cutoffs)) \
-                or (min(cutoffs) <= 0) \
-                or (max(cutoffs) >= (n_classes - 1)) \
-                or (len(set(cutoffs)) != len(cutoffs)) \
-                or any([int(c) != c for c in cutoffs]):
-            raise ValueError("cutoffs should be a sequence of unique, positive "
-                             "integers sorted in an increasing order, where "
-                             "each value is between 1 and n_classes-1")
-
-        self.in_features = in_features
-        self.n_classes = n_classes
-        self.cutoffs = cutoffs + [n_classes]
-
-        self.shortlist_size = self.cutoffs[0]
-        self.n_clusters = len(self.cutoffs) - 1
-        self.head_size = self.shortlist_size + self.n_clusters
-
-        self.cluster_weight = nn.Parameter(torch.zeros(self.n_clusters, self.in_features))
-        self.cluster_bias = nn.Parameter(torch.zeros(self.n_clusters))
-
-        self.keep_order = keep_order
-
-    def forward(self, hidden, target, weight, bias, keep_order=False):
-        if hidden.size(0) != target.size(0):
-            raise RuntimeError('Input and target should have the same size '
-                               'in the batch dimension.')
-
-        head_weight = torch.cat(
-            [weight[:self.shortlist_size], self.cluster_weight], dim=0)
-        head_bias = torch.cat(
-            [bias[:self.shortlist_size], self.cluster_bias], dim=0)
-
-        head_logit = F.linear(hidden, head_weight, bias=head_bias)
-        head_logprob = F.log_softmax(head_logit, dim=1)
-
-        nll = torch.zeros_like(target,
-                               dtype=hidden.dtype, device=hidden.device)
-
-        offset = 0
-        cutoff_values = [0] + self.cutoffs
-        for i in range(len(cutoff_values) - 1):
-            l_idx, h_idx = cutoff_values[i], cutoff_values[i + 1]
-
-            mask_i = (target >= l_idx) & (target < h_idx)
-            indices_i = mask_i.nonzero().squeeze()
-
-            if indices_i.numel() == 0:
-                continue
-
-            target_i = target.index_select(0, indices_i) - l_idx
-            head_logprob_i = head_logprob.index_select(0, indices_i)
-
-            if i == 0:
-                logprob_i = head_logprob_i.gather(1, target_i[:, None]).squeeze(1)
-            else:
-                weight_i = weight[l_idx:h_idx]
-                bias_i = bias[l_idx:h_idx]
-
-                hidden_i = hidden.index_select(0, indices_i)
-
-                tail_logit_i = F.linear(hidden_i, weight_i, bias=bias_i)
-                tail_logprob_i = F.log_softmax(tail_logit_i, dim=1)
-
-                logprob_i = head_logprob_i[:, -i] \
-                            + tail_logprob_i.gather(1, target_i[:, None]).squeeze(1)
-
-            if (hasattr(self, 'keep_order') and self.keep_order) or keep_order:
-                nll.index_copy_(0, indices_i, -logprob_i)
-            else:
-                nll[offset:offset + logprob_i.size(0)].copy_(-logprob_i)
-
-            offset += logprob_i.size(0)
-
-        return nll
-
 
 class ProjectedAdaptiveLogSoftmax(nn.Module):
     def __init__(self, n_token, d_embed, d_proj, cutoffs, div_val=1,
@@ -231,3 +151,74 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
                 offset += logprob_i.size(0)
 
         return nll
+
+
+'''
+https://arxiv.org/pdf/1809.10853.pdf
+Introduce adaptive input embeddings which extend the adaptive softmax to input
+word representations.
+'''
+
+
+class AdaptiveEmbedding(nn.Module):
+    def __init__(self, n_token, d_embed, d_proj, cutoffs, div_val=1,
+                 sample_softmax=False):
+        super(AdaptiveEmbedding, self).__init__()
+
+        self.n_token = n_token
+        self.d_embed = d_embed
+
+        self.cutoffs = cutoffs + [n_token]
+        self.div_val = div_val
+        self.d_proj = d_proj
+
+        self.emb_scale = d_proj ** 0.5
+
+        self.cutoff_ends = [0] + self.cutoffs
+
+        self.emb_layers = nn.ModuleList()
+        self.emb_projs = nn.ParameterList()
+        if div_val == 1:
+            self.emb_layers.append(
+                nn.Embedding(n_token, d_embed, sparse=sample_softmax > 0)
+            )
+            if d_proj != d_embed:
+                self.emb_projs.append(nn.Parameter(torch.Tensor(d_proj, d_embed)))
+        else:
+            for i in range(len(self.cutoffs)):
+                l_idx, r_idx = self.cutoff_ends[i], self.cutoff_ends[i + 1]
+                d_emb_i = d_embed // (div_val ** i)
+                self.emb_layers.append(nn.Embedding(r_idx - l_idx, d_emb_i))
+                self.emb_projs.append(nn.Parameter(torch.Tensor(d_proj, d_emb_i)))
+
+    def forward(self, inp):
+        if self.div_val == 1:
+            embed = self.emb_layers[0](inp)
+            if self.d_proj != self.d_embed:
+                embed = F.linear(embed, self.emb_projs[0])
+        else:
+            param = next(self.parameters())
+            inp_flat = inp.view(-1)
+            emb_flat = torch.zeros([inp_flat.size(0), self.d_proj],
+                                   dtype=param.dtype, device=param.device)
+            for i in range(len(self.cutoffs)):
+                l_idx, r_idx = self.cutoff_ends[i], self.cutoff_ends[i + 1]
+
+                mask_i = (inp_flat >= l_idx) & (inp_flat < r_idx)
+                indices_i = mask_i.nonzero().squeeze()
+
+                if indices_i.numel() == 0:
+                    continue
+
+                inp_i = inp_flat.index_select(0, indices_i) - l_idx
+                emb_i = self.emb_layers[i](inp_i)
+                emb_i = F.linear(emb_i, self.emb_projs[i])
+
+                emb_flat.index_copy_(0, indices_i, emb_i)
+
+            print(inp.size())
+            embed = emb_flat.view(inp.size(0), inp.size(1), inp.size(2), inp.size(3), self.d_proj)
+
+        embed.mul_(self.emb_scale)
+
+        return embed

@@ -89,3 +89,4 @@ class RelativePositionalEmbedding(nn.Module):
         sinusoid_inp = torch.einsum("i,j->ij", positions.float(), self.inv_freq)
         pos_emb = torch.cat([sinusoid_inp.sin(), sinusoid_inp.cos()], dim=-1)
         return pos_emb[:, None, :]
+
