@@ -76,7 +76,7 @@ class BERTEmbedding(nn.Module):
 # used in Transformer-XL and XLNet
 class RelativePositionalEmbedding(nn.Module):
     def __init__(self, d):
-        super(PositionalEmbedding, self).__init__()
+        super(RelativePositionalEmbedding, self).__init__()
         self.d = d
         inv_freq = 1 / (10000 ** (torch.arange(0.0, d, 2.0) / d))
         # register buffer tells pytorch that this tensor is part of the model

@@ -1,5 +1,22 @@
+# coding=utf-8
 """
 src:https://github.com/kimiyoung/transformer-xl/tree/master/pytorch
+
+The brief introduction of Transformer-XL:
+  Transformer-XL processes the first segment of tokens but keeps the outputs of the hidden layers.
+  When the following segment is processed, each hidden layer receives two inputs.
+    - the output of the previous hidden layer of that segment
+    - the output of the previous hidden layer from the previous segment
+
+  Use relative positional encoding to incorporate position information, which
+    expands the simple multiplication of the Attention Head’s Score (Qi*Kj) to include four parts:
+        1. Content weight - the original score without the addition of the original positional encoding of course.
+        2. Positional bias with respect to the current content (Qi). It uses a similar sinusoidal function that receives
+            the distance between tokens (e.g. i-j), instead of the absolute position of the current token.
+        3. A learned global content bias - The model adds a learned vector that adjusts the importance of the other token content (Kj).
+        4. A learned global bias - Another learned vector that adjusts the importance based only on the distance
+            between the tokens (e.g. the last previous words are probably more important than a word from a previous paragraph).
+
 
 The task is two-fold, see paper section 3.1
 1) to predict the second part of a sentence (Next Sentence Prediction)
@@ -45,15 +62,11 @@ python transformer_xl_3.py  --data ./data/wikitext-103/ \
 
 """
 
-# coding: utf-8
 import argparse
 import time
 import math
-import os, sys
 import itertools
-
 import numpy as np
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -288,8 +301,7 @@ elif args.optim.lower() == 'adam':
         optimizer = optim.Adam(dense_params, lr=args.lr)
     else:
         optimizer = optim.Adam(model.parameters(), lr=args.lr)
-elif args.optim.lower() == 'adagrad':
-    optimizer = optim.Adagrad(model.parameters(), lr=args.lr)
+
 
 #### scheduler
 if args.scheduler == 'cosine':
@@ -311,18 +323,8 @@ elif args.scheduler == 'inv_sqrt':
         else:
             return 1. / (step ** 0.5) if step > args.warmup_step \
                 else step / (args.warmup_step ** 1.5)
-
-
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
-elif args.scheduler == 'dev_perf':
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer,
-                                                     factor=args.decay_rate, patience=args.patience, min_lr=args.lr_min)
-    if args.sample_softmax > 0:
-        scheduler_sparse = optim.lr_scheduler.ReduceLROnPlateau(optimizer_sparse,
-                                                                factor=args.decay_rate, patience=args.patience,
-                                                                min_lr=args.lr_min)
-elif args.scheduler == 'constant':
-    pass
+
 
 
 logging('=' * 100)
@@ -407,7 +409,7 @@ def train():
 
         # step-wise learning rate annealing
         train_step += 1
-        if args.scheduler in ['cosine', 'constant', 'dev_perf']:
+        if args.scheduler in ['cosine', 'constant']:
             # linear warmup stage
             if train_step < args.warmup_step:
                 curr_lr = args.lr * train_step / args.warmup_step
@@ -459,11 +461,6 @@ def train():
                         torch.save(optimizer.state_dict(), f)
                 best_val_loss = val_loss
 
-            # dev-performance based learning rate annealing
-            if args.scheduler == 'dev_perf':
-                scheduler.step(val_loss)
-                if args.sample_softmax > 0:
-                    scheduler_sparse.step(val_loss)
 
             eval_start_time = time.time()
 
