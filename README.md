@@ -43,5 +43,7 @@
 
 ### Requirements
 Python = 2.7 and 3.6
+
 PyTorch = 1.2+ [[here]](https://pytorch.org/) for both python versions
+
 GPU training with 4G+ memory, testing with 1G+ memory.
