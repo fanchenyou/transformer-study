@@ -38,7 +38,7 @@
     * pip install transformers tb-nightly 
 
 
-#### 7. ALBERT, A LITE BERT, [paper](https://arxiv.org/pdf/1909.11942.pdf), [src](https://github.com/graykode/ALBERT-Pytorch), [tutorial](https://medium.com/@lessw/meet-albert-a-new-lite-bert-from-google-toyota-with-state-of-the-art-nlp-performance-and-18x-df8f7b58fa28)
+#### 7. ALBERT, A Lite BERT, [paper](https://arxiv.org/pdf/1909.11942.pdf), [src](https://github.com/graykode/ALBERT-Pytorch), [tutorial](https://medium.com/@lessw/meet-albert-a-new-lite-bert-from-google-toyota-with-state-of-the-art-nlp-performance-and-18x-df8f7b58fa28)
     * A Lite BERT which reduces BERT params to ~20%
     * Decouple word embedding size with hidden size by using two word projection matrices 
        - parameters are reduced from O(V*H) to O(V*E + E*H) s.t. E << H
