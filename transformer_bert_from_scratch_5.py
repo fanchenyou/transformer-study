@@ -39,7 +39,7 @@ from utils.embedding import BERTEmbedding
 from utils.dataset import BERTDataset
 from utils.vocab import WordVocab
 from utils.optim_schedule import ScheduledOptim
-
+from utils.attention import PositionwiseFeedForward
 
 class SublayerConnection(nn.Module):
     """
@@ -55,20 +55,6 @@ class SublayerConnection(nn.Module):
     def forward(self, x, sublayer):
         """Apply residual connection to any sublayer with the same size."""
         return x + self.dropout(sublayer(self.norm(x)))
-
-
-class PositionwiseFeedForward(nn.Module):
-    """Implements FFN equation."""
-
-    def __init__(self, d_model, d_ff, dropout=0.1):
-        super(PositionwiseFeedForward, self).__init__()
-        self.w_1 = nn.Linear(d_model, d_ff)
-        self.w_2 = nn.Linear(d_ff, d_model)
-        self.dropout = nn.Dropout(dropout)
-        self.activation = F.gelu
-
-    def forward(self, x):
-        return self.w_2(self.dropout(self.activation(self.w_1(x))))
 
 
 class TransformerBlock(nn.Module):
